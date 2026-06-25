@@ -95,7 +95,7 @@ export function ConfirmationsPage() {
               <section key={accountId}>
                 <div className="mb-2 flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <Avatar name={account.name} color={account.avatarColor} size={26} />
+                    <Avatar name={account.name} color={account.avatarColor} url={account.avatarUrl} size={26} />
                     <span className="font-semibold">{account.name}</span>
                     <span className="rounded-full bg-surface-sunken px-2 py-0.5 text-xs font-semibold text-ink-muted">
                       {items.length}

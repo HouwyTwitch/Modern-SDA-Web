@@ -7,6 +7,7 @@ export interface Account {
   name: string;
   steamId: string;
   avatarColor: string;
+  avatarUrl: string | null;
   proxy: string | null;
   status: AccountStatus;
   favorite: boolean;

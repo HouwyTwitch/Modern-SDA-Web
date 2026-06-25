@@ -70,8 +70,8 @@ export const api = {
     request<{ secrets: Record<string, string> }>("POST", `/accounts/${id}/reveal`, { password }),
 
   // ---- steam session ----
-  steamLogin: (id: string, password?: string) =>
-    request<Account>("POST", `/accounts/${id}/steam-login`, { password }),
+  steamLogin: (id: string, password?: string, remember = false) =>
+    request<Account>("POST", `/accounts/${id}/steam-login`, { password, remember }),
 
   // ---- confirmations ----
   accountConfirmations: (id: string) =>

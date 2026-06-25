@@ -28,7 +28,7 @@ export function AccountRow({ account, remaining, onOpen }: Props) {
       onClick={onOpen}
       className="card hover-lift group flex w-full items-center gap-3 p-3 text-left hover:border-accent/50 sm:gap-4 sm:p-4"
     >
-      <Avatar name={account.name} color={account.avatarColor} size={48} />
+      <Avatar name={account.name} color={account.avatarColor} url={account.avatarUrl} size={48} />
 
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">

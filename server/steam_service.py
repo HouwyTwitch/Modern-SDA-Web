@@ -10,15 +10,50 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import json
 import re
 import time
 from contextlib import asynccontextmanager
 from urllib.parse import unquote
 
+import httpx
 from aiohttp import ClientSession
 from aiosteampy import Confirmation, ConfirmationType, SteamClient
 
 STEAM_API = "https://api.steampowered.com"
+
+
+def steamid_from_jwt(token: str | None) -> str | None:
+    """Extract the steamid (`sub`) from a Steam refresh/access token, unverified."""
+    if not token:
+        return None
+    try:
+        payload = token.split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        data = json.loads(base64.urlsafe_b64decode(payload))
+        sub = str(data.get("sub", ""))
+        return sub or None
+    except Exception:
+        return None
+
+
+def resolve_steam_id(secrets: dict, fallback: str) -> str:
+    """Prefer the steamid embedded in the refresh token over the stored one, so a
+    session always matches the account it was issued for."""
+    return steamid_from_jwt(secrets.get("refresh_token")) or fallback
+
+
+async def fetch_avatar(steam_id: str, proxy: str | None = None) -> str | None:
+    """Best-effort fetch of an account's public Steam avatar URL."""
+    if not steam_id:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=6, proxy=proxy or None) as c:
+            r = await c.get(f"https://steamcommunity.com/profiles/{steam_id}?xml=1")
+        m = re.search(r"<avatarFull>\s*<!\[CDATA\[(.*?)\]\]>\s*</avatarFull>", r.text, re.DOTALL)
+        return m.group(1).strip() if m else None
+    except Exception:
+        return None
 
 _TYPE_MAP = {
     ConfirmationType.TRADE: "trade",
@@ -34,6 +69,11 @@ class SteamServiceError(Exception):
 def _client(secrets: dict, steam_id: str, proxy: str | None) -> SteamClient:
     if not secrets.get("shared_secret"):
         raise SteamServiceError("Account has no shared_secret")
+    # Use the steamid the refresh token was issued for when available — this
+    # avoids "token belongs to a different account" errors from a stale steamid.
+    steam_id = resolve_steam_id(secrets, steam_id)
+    if not steam_id:
+        raise SteamServiceError("Unknown steamid for this account")
     return SteamClient(
         steam_id=int(steam_id),
         username=secrets.get("account_name") or "user",
@@ -165,7 +205,7 @@ async def approve_qr_login(
         raise SteamServiceError("Missing shared_secret")
 
     secret = base64.b64decode(secrets["shared_secret"])
-    steam_id_int = int(steam_id)
+    steam_id_int = int(resolve_steam_id(secrets, steam_id))
     payload = (
         (1).to_bytes(2, "little")
         + client_id.to_bytes(8, "little")

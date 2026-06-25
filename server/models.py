@@ -43,6 +43,7 @@ class SteamAccount(Base):
     name: Mapped[str] = mapped_column(String)
     steam_id: Mapped[str] = mapped_column(String, default="")
     avatar_color: Mapped[str] = mapped_column(String, default="#1a9fff")
+    avatar_url: Mapped[str | None] = mapped_column(String, nullable=True)
     proxy: Mapped[str | None] = mapped_column(String, nullable=True)
     status: Mapped[str] = mapped_column(String, default="needs_login")
     favorite: Mapped[bool] = mapped_column(Boolean, default=False)

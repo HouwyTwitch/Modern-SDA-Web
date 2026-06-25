@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { LogIn, Loader2, ShieldCheck } from "lucide-react";
+import { LogIn, Loader2, Check } from "lucide-react";
 import { Modal } from "../common/Modal";
 import { useStore } from "../../store/useStore";
 import type { Account } from "../../types";
@@ -14,6 +14,7 @@ interface Props {
 export function SteamLinkModal({ account, open, onClose }: Props) {
   const steamLogin = useStore((s) => s.steamLogin);
   const [password, setPassword] = useState("");
+  const [remember, setRemember] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
 
@@ -21,7 +22,7 @@ export function SteamLinkModal({ account, open, onClose }: Props) {
     setError(undefined);
     setBusy(true);
     try {
-      await steamLogin(account.id, password || undefined);
+      await steamLogin(account.id, password || undefined, remember);
       setPassword("");
       onClose();
     } catch (e) {
@@ -32,15 +33,7 @@ export function SteamLinkModal({ account, open, onClose }: Props) {
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="Sign in to Steam">
-      <div className="mb-4 flex items-start gap-3 rounded-xl bg-accent-soft p-3 text-sm text-accent">
-        <ShieldCheck size={18} className="mt-0.5 shrink-0" />
-        <p className="text-ink-muted">
-          Your Steam password is used once to obtain a long-lived <b>refresh token</b>, which is then
-          stored encrypted. The Steam Guard code is generated automatically from your shared secret.
-        </p>
-      </div>
-
+    <Modal open={open} onClose={onClose} title={`Sign in to Steam · ${account.name}`}>
       <label className="mb-1 block text-xs font-medium text-ink-muted">Steam password</label>
       <input
         type="password"
@@ -51,10 +44,21 @@ export function SteamLinkModal({ account, open, onClose }: Props) {
         onChange={(e) => setPassword(e.target.value)}
         onKeyDown={(e) => e.key === "Enter" && void submit()}
       />
-      <p className="mt-2 text-xs text-ink-faint">
-        For <span className="font-medium">{account.name}</span>
-        {account.steamId ? ` (${account.steamId})` : ""}.
-      </p>
+
+      <button
+        type="button"
+        onClick={() => setRemember((v) => !v)}
+        className="mt-3 flex items-center gap-2.5 text-sm text-ink-muted"
+      >
+        <span
+          className={`grid h-5 w-5 place-items-center rounded-md border transition ${
+            remember ? "border-accent bg-accent text-white" : "border-line"
+          }`}
+        >
+          {remember && <Check size={13} />}
+        </span>
+        Remember password (auto re-login when the session expires)
+      </button>
 
       {error && <p className="mt-3 rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-400">{error}</p>}
 

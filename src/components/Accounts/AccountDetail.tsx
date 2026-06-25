@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { X, Star, Trash2, LogIn, QrCode, Eye, KeyRound, ShieldCheck, ShieldAlert } from "lucide-react";
+import { X, Star, Trash2, LogIn, QrCode, Eye, Pencil, ShieldCheck, ShieldAlert } from "lucide-react";
 import type { Account } from "../../types";
 import { Avatar } from "../common/Avatar";
 import { StatusBadge } from "../common/StatusBadge";
@@ -10,6 +10,7 @@ import { timeAgo } from "../../lib/format";
 import { SteamLinkModal } from "./SteamLinkModal";
 import { QrApproveModal } from "./QrApproveModal";
 import { RevealModal } from "./RevealModal";
+import { EditAccountModal } from "./EditAccountModal";
 
 interface Props {
   account: Account;
@@ -24,6 +25,7 @@ export function AccountDetail({ account, remaining, onClose }: Props) {
   const [linkOpen, setLinkOpen] = useState(false);
   const [qrOpen, setQrOpen] = useState(false);
   const [revealOpen, setRevealOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
 
   return (
     <>
@@ -31,7 +33,7 @@ export function AccountDetail({ account, remaining, onClose }: Props) {
       <div className="fixed inset-y-0 right-0 z-40 flex w-full max-w-md animate-fade-in flex-col border-l border-line bg-surface-raised shadow-2xl lg:relative lg:z-0 lg:shadow-none">
         <div className="flex items-center justify-between border-b border-line p-4">
           <div className="flex items-center gap-3">
-            <Avatar name={account.name} color={account.avatarColor} size={40} />
+            <Avatar name={account.name} color={account.avatarColor} url={account.avatarUrl} size={40} />
             <div>
               <div className="flex items-center gap-1.5 font-bold">
                 {account.name}
@@ -40,9 +42,14 @@ export function AccountDetail({ account, remaining, onClose }: Props) {
               <StatusBadge status={account.status} />
             </div>
           </div>
-          <button onClick={onClose} className="btn-ghost !p-2">
-            <X size={18} />
-          </button>
+          <div className="flex items-center gap-1">
+            <button onClick={() => setEditOpen(true)} className="btn-ghost !p-2" title="Edit">
+              <Pencil size={17} />
+            </button>
+            <button onClick={onClose} className="btn-ghost !p-2">
+              <X size={18} />
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto p-4">
@@ -113,9 +120,6 @@ export function AccountDetail({ account, remaining, onClose }: Props) {
             </div>
           </div>
 
-          <div className="mt-5 flex items-center gap-2 rounded-xl bg-surface-sunken px-3 py-2.5 text-xs text-ink-faint">
-            <KeyRound size={14} /> Secrets are sealed — decryptable only by you or the server.
-          </div>
         </div>
 
         <div className="border-t border-line p-4">
@@ -136,6 +140,7 @@ export function AccountDetail({ account, remaining, onClose }: Props) {
       <SteamLinkModal account={account} open={linkOpen} onClose={() => setLinkOpen(false)} />
       <QrApproveModal account={account} open={qrOpen} onClose={() => setQrOpen(false)} />
       <RevealModal account={account} open={revealOpen} onClose={() => setRevealOpen(false)} />
+      <EditAccountModal account={account} open={editOpen} onClose={() => setEditOpen(false)} />
     </>
   );
 }

@@ -56,10 +56,9 @@ export function RevealModal({ account, open, onClose }: Props) {
     <Modal open={open} onClose={close} title="Reveal secrets">
       {!secrets ? (
         <>
-          <p className="mb-4 flex items-start gap-2 text-sm text-ink-muted">
-            <Lock size={16} className="mt-0.5 shrink-0 text-accent" />
-            Enter your account password to decrypt these secrets with <b>your</b> key. This proves the
-            data is recoverable by you, not just the server.
+          <p className="mb-4 flex items-center gap-2 text-sm text-ink-muted">
+            <Lock size={16} className="shrink-0 text-accent" />
+            Enter your password to decrypt these secrets.
           </p>
           <input
             type="password"

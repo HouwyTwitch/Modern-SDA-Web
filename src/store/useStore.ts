@@ -24,7 +24,7 @@ interface StoreState {
   updateAccount: (id: string, patch: Record<string, unknown>) => Promise<void>;
   deleteAccount: (id: string) => Promise<void>;
   toggleFavorite: (id: string) => Promise<void>;
-  steamLogin: (id: string, password?: string) => Promise<void>;
+  steamLogin: (id: string, password?: string, remember?: boolean) => Promise<void>;
   qrApprove: (id: string, url: string, confirm: boolean) => Promise<void>;
   reveal: (id: string, password: string) => Promise<Record<string, string>>;
 
@@ -109,8 +109,8 @@ export const useStore = create<StoreState>((set, get) => ({
     await get().updateAccount(id, { favorite: !acc.favorite });
   },
 
-  steamLogin: async (id, password) => {
-    const updated = await api.steamLogin(id, password);
+  steamLogin: async (id, password, remember) => {
+    const updated = await api.steamLogin(id, password, remember);
     set((s) => ({ accounts: s.accounts.map((a) => (a.id === id ? { ...a, ...updated } : a)) }));
     get().pushToast("Signed in to Steam", "success");
   },

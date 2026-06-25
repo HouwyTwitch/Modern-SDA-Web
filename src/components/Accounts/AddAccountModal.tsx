@@ -25,6 +25,7 @@ export function AddAccountModal({ open, onClose }: Props) {
   const [shared, setShared] = useState("");
   const [identity, setIdentity] = useState("");
   const [password, setPassword] = useState("");
+  const [proxy, setProxy] = useState("");
 
   function reset() {
     setError(undefined);
@@ -33,6 +34,7 @@ export function AddAccountModal({ open, onClose }: Props) {
     setShared("");
     setIdentity("");
     setPassword("");
+    setProxy("");
   }
   function close() {
     reset();
@@ -40,7 +42,10 @@ export function AddAccountModal({ open, onClose }: Props) {
   }
 
   async function addParsed(parsed: ParsedMaFile, pw?: string) {
-    await addAccount(parsed, pw ? { password: pw } : undefined);
+    await addAccount(parsed, {
+      ...(pw ? { password: pw } : {}),
+      ...(proxy.trim() ? { proxy: proxy.trim() } : {}),
+    });
   }
 
   async function handleFiles(files: FileList | null) {
@@ -144,10 +149,9 @@ export function AddAccountModal({ open, onClose }: Props) {
             className="hidden"
             onChange={(e) => void handleFiles(e.target.files)}
           />
-          <p className="mt-3 text-xs text-ink-faint">
-            Files are parsed locally, then secrets are sent over HTTPS and sealed with envelope
-            encryption on the server. Sign in to Steam afterwards to enable confirmations.
-          </p>
+          <div className="mt-3">
+            <Field label="Proxy (optional)" value={proxy} onChange={setProxy} placeholder="http://user:pass@host:port" />
+          </div>
         </div>
       ) : (
         <div className="space-y-3">
@@ -156,6 +160,7 @@ export function AddAccountModal({ open, onClose }: Props) {
           <Field label="Shared secret *" value={shared} onChange={setShared} placeholder="base64…" mono />
           <Field label="Identity secret (for confirmations)" value={identity} onChange={setIdentity} placeholder="base64… (optional)" mono />
           <Field label="Steam password (optional — to link now)" value={password} onChange={setPassword} placeholder="••••••••" type="password" />
+          <Field label="Proxy (optional)" value={proxy} onChange={setProxy} placeholder="http://user:pass@host:port" />
           <button onClick={() => void submitManual()} disabled={busy} className="btn-accent w-full">
             {busy ? <Loader2 size={16} className="animate-spin" /> : <KeyRound size={16} />} Add account
           </button>

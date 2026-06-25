@@ -48,23 +48,11 @@ export function LoginPage() {
             Your Steam authenticator, <span className="text-accent">everywhere.</span>
           </h1>
           <p className="mt-4 max-w-md text-ink-muted">
-            Manage every account, generate Steam Guard codes, and approve trades & QR logins from
-            any device — with your secrets sealed by end-to-end encryption.
+            Manage every account, generate Steam Guard codes, and approve trades & QR logins from any
+            device.
           </p>
-          <ul className="mt-6 space-y-2 text-sm text-ink-muted">
-            {["Live confirmations & QR login approval", "Per-user encrypted vaults", "Multi-account, fast & smooth"].map(
-              (f) => (
-                <li key={f} className="flex items-center gap-2">
-                  <span className="grid h-5 w-5 place-items-center rounded-full bg-accent-soft text-accent">
-                    ✓
-                  </span>
-                  {f}
-                </li>
-              ),
-            )}
-          </ul>
         </div>
-        <div className="text-xs text-ink-faint">v2.0.0 · Secrets decryptable only by you or the server</div>
+        <div className="text-xs text-ink-faint">v2.0.0</div>
       </div>
 
       {/* Form panel */}
@@ -125,11 +113,6 @@ export function LoginPage() {
             >
               {mode === "login" ? "Sign up" : "Sign in"}
             </button>
-          </p>
-
-          <p className="mt-8 rounded-xl bg-surface-sunken px-4 py-3 text-xs text-ink-faint">
-            🔒 Your account secrets are encrypted at rest. They can be decrypted only by you (with
-            your password) or the server — never exposed to anyone else.
           </p>
         </div>
       </div>

@@ -81,6 +81,7 @@ def _account_out(a: SteamAccount) -> dict:
         "name": a.name,
         "steamId": a.steam_id,
         "avatarColor": a.avatar_color,
+        "avatarUrl": a.avatar_url,
         "proxy": a.proxy,
         "status": a.status,
         "favorite": a.favorite,
@@ -101,6 +102,13 @@ async def _get_owned_account(db: AsyncSession, principal: Principal, account_id:
 
 def _server_secrets(acc: SteamAccount) -> dict:
     return vault.decrypt_with_server(acc.secrets_blob)
+
+
+def _sync_steam_id(acc: SteamAccount, secrets: dict) -> None:
+    """Keep the stored steamid aligned with the refresh token's account."""
+    resolved = steam.resolve_steam_id(secrets, acc.steam_id)
+    if resolved and resolved != acc.steam_id:
+        acc.steam_id = resolved
 
 
 async def _persist_new_refresh(db: AsyncSession, acc: SteamAccount, new_refresh: str | None):
@@ -220,12 +228,14 @@ async def add_account(
         "password": req.password or None,
         "refresh_token": req.refresh_token or None,
     }
+    steam_id = (steam.steamid_from_jwt(req.refresh_token) or req.steamId).strip()
     acc = SteamAccount(
         user_id=principal.user.id,
         name=name,
-        steam_id=req.steamId.strip(),
-        avatar_color=_avatar_color(name + req.steamId),
-        proxy=req.proxy,
+        steam_id=steam_id,
+        avatar_color=_avatar_color(name + steam_id),
+        avatar_url=await steam.fetch_avatar(steam_id, req.proxy),
+        proxy=(req.proxy or None),
         has_identity=bool(fields["identity_secret"]),
         has_session=bool(fields["refresh_token"]),
         status="online" if fields["refresh_token"] else ("needs_login" if not fields["identity_secret"] else "offline"),
@@ -310,9 +320,16 @@ async def steam_login(
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Steam login failed: {exc}") from exc
 
-    acc.secrets_blob = vault.reseal_secrets(
-        acc.secrets_blob, {"refresh_token": refresh, "password": req.password or secrets.get("password")}, user_key
-    )
+    # Only persist the password if the user asked us to remember it.
+    updates: dict[str, str | None] = {"refresh_token": refresh}
+    updates["password"] = (req.password or secrets.get("password")) if req.remember else None
+    acc.secrets_blob = vault.reseal_secrets(acc.secrets_blob, updates, user_key)
+
+    # Correct the stored steamid to match the account we actually logged into.
+    real_steam_id = steam.steamid_from_jwt(refresh)
+    if real_steam_id:
+        acc.steam_id = real_steam_id
+        acc.avatar_url = (await steam.fetch_avatar(real_steam_id, acc.proxy)) or acc.avatar_url
     acc.has_session = True
     acc.status = "online"
     acc.last_login = time.time()
@@ -329,6 +346,7 @@ async def account_confirmations(
 ):
     acc = await _get_owned_account(db, principal, account_id)
     secrets = _server_secrets(acc)
+    _sync_steam_id(acc, secrets)
     try:
         items, new_refresh = await steam.list_confirmations(acc.id, secrets, acc.steam_id, acc.proxy)
     except steam.SteamServiceError as exc:
@@ -336,6 +354,7 @@ async def account_confirmations(
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Steam error: {exc}") from exc
     await _persist_new_refresh(db, acc, new_refresh)
+    await db.commit()
     return {"confirmations": items}
 
 
@@ -353,12 +372,14 @@ async def all_confirmations(
     errors: list[dict] = []
     for acc in res.scalars().all():
         secrets = _server_secrets(acc)
+        _sync_steam_id(acc, secrets)
         try:
             items, new_refresh = await steam.list_confirmations(acc.id, secrets, acc.steam_id, acc.proxy)
             out.extend(items)
             await _persist_new_refresh(db, acc, new_refresh)
         except Exception as exc:  # noqa: BLE001
             errors.append({"accountId": acc.id, "error": str(exc)})
+    await db.commit()
     return {"confirmations": out, "errors": errors}
 
 

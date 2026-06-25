@@ -25,6 +25,7 @@ class AccountOut(BaseModel):
     name: str
     steamId: str
     avatarColor: str
+    avatarUrl: str | None
     proxy: str | None
     status: str
     favorite: bool
@@ -66,6 +67,7 @@ class UpdateAccountRequest(BaseModel):
 
 class SteamLoginRequest(BaseModel):
     password: str | None = None  # if omitted, uses stored password
+    remember: bool = False  # store the password (encrypted) for automatic re-login
 
 
 class RevealRequest(BaseModel):

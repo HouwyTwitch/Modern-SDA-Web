@@ -34,13 +34,7 @@ export function CodeDisplay({ code, size = "md", onCopy }: Props) {
       title="Copy code"
       className="group inline-flex items-center gap-2 font-mono font-bold tracking-[0.18em] text-accent transition active:scale-95"
     >
-      <span className={SIZES[size]}>
-        {code.split("").map((ch, i) => (
-          <span key={i} className={i === 2 ? "ml-1.5" : ""}>
-            {ch}
-          </span>
-        ))}
-      </span>
+      <span className={SIZES[size]}>{code}</span>
       <span className="text-ink-faint opacity-0 transition group-hover:opacity-100">
         {copied ? <Check size={16} className="text-green-400" /> : <Copy size={16} />}
       </span>

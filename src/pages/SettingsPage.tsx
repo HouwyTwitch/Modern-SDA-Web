@@ -1,5 +1,5 @@
 import { type ReactNode } from "react";
-import { Palette, Sun, ShieldCheck, LogOut, Lock, Server, User } from "lucide-react";
+import { Palette, Sun, LogOut, User } from "lucide-react";
 import { useSettings } from "../store/useSettings";
 import { useAuth } from "../store/useAuth";
 import { useStore } from "../store/useStore";
@@ -113,25 +113,7 @@ export function SettingsPage() {
         </div>
       </Section>
 
-      <Section title="Security">
-        <Row icon={<Lock size={18} />} label="Vault encryption">
-          <span className="chip bg-green-500/10 text-green-400">AES-256-GCM</span>
-        </Row>
-        <Row icon={<ShieldCheck size={18} />} label="Key derivation">
-          scrypt
-        </Row>
-        <Row icon={<Server size={18} />} label="Who can decrypt">
-          You or the server
-        </Row>
-      </Section>
-
-      <p className="mt-6 rounded-xl bg-surface-sunken px-4 py-3 text-xs text-ink-faint">
-        Each account's secrets are sealed with a per-account data key that is wrapped twice — once
-        with your password-derived key, once with the server's master key. Codes are generated
-        server-side and never expose your secrets to the browser unless you explicitly reveal them.
-      </p>
-
-      <p className="mt-4 text-center text-xs text-ink-faint">Modern SDA Web v2.0.0</p>
+      <p className="mt-8 text-center text-xs text-ink-faint">Modern SDA Web v2.0.0</p>
     </div>
   );
 }

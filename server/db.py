@@ -24,6 +24,19 @@ async def init_db() -> None:
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(_migrate)
+
+
+def _migrate(sync_conn) -> None:
+    """Add columns introduced after the first release (SQLite has no easy ALTER)."""
+    from sqlalchemy import inspect
+
+    insp = inspect(sync_conn)
+    if "steam_accounts" not in insp.get_table_names():
+        return
+    cols = {c["name"] for c in insp.get_columns("steam_accounts")}
+    if "avatar_url" not in cols:
+        sync_conn.exec_driver_sql("ALTER TABLE steam_accounts ADD COLUMN avatar_url VARCHAR")
 
 
 async def get_db() -> AsyncIterator[AsyncSession]:
