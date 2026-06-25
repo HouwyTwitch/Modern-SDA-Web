@@ -18,9 +18,9 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from config import BASE_DIR
+from config import DATA_DIR
 
-_PRIVATE_KEY_FILE = BASE_DIR / ".dev_rsa_private.pem"
+_PRIVATE_KEY_FILE = DATA_DIR / ".dev_rsa_private.pem"
 
 
 @lru_cache

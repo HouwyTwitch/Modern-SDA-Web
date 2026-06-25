@@ -1,132 +1,140 @@
-# Modern SDA Web
+<div align="center">
 
-A fast, modern, **multi-user** Steam Desktop Authenticator for the browser — a web
-port of [Modern-SDA](https://github.com/HouwyTwitch/Modern-SDA) (PyQt5) and
-[Modern-SDA-Android](https://github.com/HouwyTwitch/Modern-SDA-Android) (Compose).
+# 🛡️ Modern SDA Web
 
-Each user signs in, manages their own Steam accounts, generates Steam Guard
-codes, and approves trade/market confirmations and **QR logins** live — with
-every account secret sealed by envelope encryption.
+**A fast, modern, multi-user Steam Desktop Authenticator for your browser.**
 
-![accounts](docs/desktop-accounts.png)
+Generate Steam Guard codes, approve trade & market confirmations, and approve
+QR logins — for all your accounts, from any device — with every secret sealed by
+strong encryption.
 
-## Highlights
+A web port of [Modern-SDA](https://github.com/HouwyTwitch/Modern-SDA) (desktop)
+and [Modern-SDA-Android](https://github.com/HouwyTwitch/Modern-SDA-Android).
 
-- 👤 **Multi-user** — register/sign in; every user has their own private set of
-  Steam accounts (JWT auth).
-- 🔐 **Encrypted vaults** — each account's secrets are sealed so they can be
-  decrypted **only by you** (your password) **or the server** (its master key),
-  never by anyone with just the database. See [Encryption](#encryption).
-- 🔑 **Live Steam Guard codes** — generated server-side, rotating every 30s with
-  animated countdown rings.
-- 🔄 **Live confirmations** — list, approve, decline, and bulk-accept trade &
-  market confirmations directly against Steam (via `aiosteampy`).
-- 📷 **QR login approval** — approve a Steam "sign in with QR" challenge by
-  pasting the URL or scanning it with your camera; signed with the account's
-  shared secret (mirrors Modern-SDA's `UpdateAuthSessionWithMobileConfirmation`).
-- 🪪 **Refresh-token sessions** — sign in to Steam once; a refresh token is stored
-  encrypted and reused, refreshing the access token automatically.
-- 🎨 **Polished, responsive UI** — Dark/Light/High-contrast/System themes, accent
-  colors, glass surfaces, smooth transitions; desktop sidebar + mobile bottom nav.
+</div>
 
-## Architecture
+![Accounts screen](docs/desktop-accounts.png)
 
-```
-React + TS + Vite + Tailwind  ──HTTPS/JWT──►  FastAPI (Python)
-  (UI, theming, countdowns)                     ├─ SQLite (users, accounts)
-                                                ├─ envelope encryption (vault.py)
-                                                └─ aiosteampy ──► Steam
-```
+---
 
-| Layer    | Tech                                                              |
-| -------- | ---------------------------------------------------------------- |
-| Frontend | React 18, TypeScript, Vite, Tailwind CSS, Zustand                |
-| Backend  | FastAPI, SQLAlchemy 2 (async) + SQLite, PyJWT, `cryptography`    |
-| Steam    | `aiosteampy` (auth, refresh tokens, confirmations) + QR signing  |
+## ✨ Features
 
-## Getting started
+- 👤 **Multi-user** — each person signs in and manages their own private set of Steam accounts.
+- 🔑 **Live Steam Guard codes** — rotating every 30s with animated countdown rings.
+- 🔄 **Live confirmations** — view, approve, decline, and bulk-accept trade & market confirmations.
+- 📷 **QR login approval** — approve a Steam "sign in with QR" by pasting/scanning the QR image or link.
+- 🪪 **Refresh-token sessions** — sign in to Steam once; the session is reused and refreshed automatically.
+- 🌐 **Per-account proxy** support.
+- 🎨 **Polished, responsive UI** — light/dark/contrast themes, accent colors, desktop + mobile layouts.
+- 🔐 **Strong security** — see [Security](#-security).
 
-Run the backend and frontend together (the Vite dev server proxies `/api` to the
-backend automatically — see `vite.config.ts`).
+## 🚀 Quick start
 
-### 1. Backend
+You only need to install **[Python 3.10+](https://www.python.org/downloads/)** and
+**[Node.js 18+](https://nodejs.org)** once. Then:
 
+### Windows
+> Double-click **`run.bat`**
+
+### macOS / Linux
 ```bash
-cd server
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn main:app --reload --port 8000
+./run.sh
 ```
 
-On first run it generates a dev master key + JWT secret (gitignored). **In
-production set `SERVER_MASTER_KEY` and `JWT_SECRET`** to strong random values:
+The launcher sets everything up the first time (a minute or two), then opens
+**http://localhost:8000** in your browser. Subsequent launches are instant.
 
+### Docker (only Docker required)
 ```bash
-export SERVER_MASTER_KEY=$(python -c "import secrets;print(secrets.token_hex(32))")
-export JWT_SECRET=$(python -c "import secrets;print(secrets.token_hex(32))")
+docker compose up --build
 ```
+Then open **http://localhost:8000**.
 
-### 2. Frontend
+> First time here? Read the **[Installation Guide](docs/INSTALL.md)** for
+> step-by-step instructions (including how to install Python and Node), and the
+> **[User Guide](docs/USER_GUIDE.md)** to learn how to add accounts and approve
+> confirmations.
 
-```bash
-npm install
-npm run dev          # http://localhost:5173
-```
+## 📚 Documentation
 
-Register an account, import a `.maFile` (or add manually), then **Sign in to
-Steam** on an account to enable live confirmations and QR approval.
+| Guide | What's inside |
+| ----- | ------------- |
+| **[Installation](docs/INSTALL.md)** | Prerequisites, Windows/macOS/Linux/Docker setup, updating |
+| **[User Guide](docs/USER_GUIDE.md)** | Register, import `.maFile`, sign in to Steam, confirmations, QR, settings |
+| **[Security](docs/SECURITY.md)** | The full security model and threat considerations |
+| **[Deployment](docs/DEPLOYMENT.md)** | Hosting for others, environment variables, HTTPS, backups |
+| **[Troubleshooting](docs/TROUBLESHOOTING.md)** | Common problems and fixes |
 
-## Security
+## 🔐 Security
 
 Defence in depth, in layers:
 
-1. **Passwords never leave the browser in the clear.** The client derives a hash
-   from `(password, email)` with PBKDF2-SHA256 and sends only that hash; the
-   server never sees the plaintext password.
-2. **Encrypted application channel.** On top of TLS, every API request/response
-   body is encrypted: the client generates a fresh AES-256-GCM session key,
-   RSA-OAEP-wraps it under the server's public key (`/api/crypto/pubkey`), and
-   encrypts the body. The server decrypts and encrypts the response with the
-   same per-request key. Passwords, secrets, and codes are confidential even if
-   TLS is stripped.
-3. **Envelope-encrypted vault at rest.** Per Steam account, a random 256-bit
-   **data key (DEK)** encrypts each secret with AES-256-GCM. The DEK is
-   **wrapped twice** — once with your password-derived key (scrypt), once with
-   the server master key. Either wrap recovers the DEK, so the **server** can
-   run live confirmations / generate codes, and **you** can decrypt with your
-   password (“Reveal secrets”), while a leaked database alone reveals nothing.
+1. **Your password never leaves the browser in the clear** — it's hashed client-side
+   (PBKDF2-SHA256) and only the hash is sent.
+2. **Encrypted application channel** — on top of HTTPS, every request/response body is
+   encrypted with a per-request AES-256-GCM key wrapped under the server's RSA key.
+3. **Envelope-encrypted vault at rest** — each account's secrets are sealed with a random
+   data key (AES-256-GCM) that is wrapped twice: once with your password-derived key
+   (scrypt) and once with the server master key. They're decryptable **only by you or the
+   server**, never by anyone with just the database.
 
-Codes are generated server-side; your secrets are never sent to the browser
-unless you explicitly reveal them.
+Plus per-account ownership checks (no IDOR), brute-force rate limiting, strict input
+validation, and constant-time password comparison. Codes are generated server-side and
+your secrets are never sent to the browser unless you explicitly reveal them.
 
-**Additional hardening:** per-account ownership checks on every endpoint (no
-IDOR), constant-time password comparison, JWT pinned to HS256, brute-force rate
-limiting on auth, numeric-SteamID / http(s)-proxy input validation (no SSRF via
-the avatar fetch), and React's default output escaping (no `innerHTML`/`eval`).
-Set `SERVER_MASTER_KEY` and `JWT_SECRET` in production (see
-`server/.env.example`).
+Full details in **[docs/SECURITY.md](docs/SECURITY.md)**.
 
-## API overview
+> ⚠️ Use this only with Steam accounts you own. Keep backups of your `.maFile`s — losing
+> your authenticator secret can lock you out of Steam.
 
-| Method | Path                                                  | Purpose                       |
-| ------ | ----------------------------------------------------- | ----------------------------- |
-| GET    | `/api/crypto/pubkey`                                  | RSA public key (channel boot) |
-| POST   | `/api/auth/register` · `/api/auth/login`              | Account auth (returns JWT)    |
-| GET    | `/api/accounts` · `/api/accounts/codes`               | List accounts + live codes    |
-| POST   | `/api/accounts`                                       | Add a Steam account           |
-| POST   | `/api/accounts/{id}/reveal`                           | Decrypt secrets with password |
-| POST   | `/api/accounts/{id}/steam-login`                      | Get a refresh token           |
-| GET    | `/api/confirmations`                                  | Live confirmations (all)      |
-| POST   | `/api/accounts/{id}/confirmations/{cid}`              | Approve / decline             |
-| POST   | `/api/accounts/{id}/qr-approve`                       | Approve a QR login            |
+## 🧱 Tech stack
 
-## Security notes
+| Layer | Tech |
+| ----- | ---- |
+| Frontend | React 18 · TypeScript · Vite · Tailwind CSS · Zustand · jsQR |
+| Backend | Python · FastAPI · SQLAlchemy 2 (async) + SQLite · PyJWT · `cryptography` |
+| Steam | `aiosteampy` (auth, refresh tokens, confirmations) |
 
-- Use only with accounts you own; keep backups of your `.maFile`s.
-- The Steam-facing calls (login, confirmations, QR) require a reachable
-  `steamcommunity.com` / `api.steampowered.com` and a valid Steam session;
-  they can't be exercised from a sandbox without real credentials.
+In production the FastAPI backend serves the built UI, so the whole app runs as a single
+service on one port.
 
-## License
+## 🗂️ Project structure
 
-MIT
+```
+.
+├─ run.bat / run.sh          one-command launchers
+├─ scripts/launch.py         cross-platform setup + run
+├─ Dockerfile / compose      container build (UI + API)
+├─ src/                      React frontend
+│  ├─ components/ pages/ store/ hooks/ lib/
+├─ server/                   FastAPI backend
+│  ├─ main.py                routes
+│  ├─ vault.py               envelope encryption
+│  ├─ server_crypto.py       RSA channel keys
+│  ├─ crypto_mw.py           encrypted-channel middleware
+│  ├─ steam_service.py       aiosteampy integration + QR approval
+│  ├─ steam_guard.py         Steam Guard code algorithm
+│  └─ static_site.py         serves the built UI
+└─ docs/                     documentation
+```
+
+## 🛠️ Development
+
+Run the frontend and backend separately with hot-reload:
+
+```bash
+# terminal 1 — backend (http://localhost:8000)
+cd server && python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn main:app --reload --port 8000
+
+# terminal 2 — frontend (http://localhost:5173, proxies /api to the backend)
+npm install
+npm run dev
+```
+
+See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for production hosting.
+
+## 📄 License
+
+[MIT](LICENSE)

@@ -1,0 +1,13 @@
+.git
+.gitignore
+node_modules
+dist
+**/__pycache__
+server/.venv
+server/*.db
+server/.dev_*
+**/.dev_*
+docs
+*.md
+.github
+scratchpad

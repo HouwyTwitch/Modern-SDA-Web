@@ -1,0 +1,22 @@
+services:
+  modern-sda:
+    build: .
+    image: modern-sda-web
+    container_name: modern-sda-web
+    ports:
+      - "8000:8000"
+    environment:
+      # Optional but recommended in production — generate with:
+      #   python -c "import secrets;print(secrets.token_hex(32))"
+      # If unset, keys are auto-generated and persisted in the data volume.
+      - SERVER_MASTER_KEY=${SERVER_MASTER_KEY:-}
+      - JWT_SECRET=${JWT_SECRET:-}
+      # The browser talks to the same origin it loads from, so this only needs
+      # to list any extra origins you serve the UI from.
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:8000}
+    volumes:
+      - msda-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  msda-data:

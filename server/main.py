@@ -35,6 +35,7 @@ from config import get_settings
 from db import get_db, init_db
 from models import SteamAccount, User
 from ratelimit import client_ip, rate_limit
+from static_site import mount_frontend
 from schemas import (
     AccountOut,
     AccountWithCode,
@@ -59,7 +60,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="Modern SDA Web API", version="2.1.0", lifespan=lifespan)
+app = FastAPI(title="Modern SDA Web API", version="2.2.0", lifespan=lifespan)
 # Order matters: CORS is added last so it is the outermost middleware.
 app.add_middleware(EncryptedChannelMiddleware)
 app.add_middleware(
@@ -488,3 +489,8 @@ async def qr_approve(
         raise HTTPException(status_code=502, detail=f"Steam error: {exc}") from exc
     await _persist_new_refresh(db, acc, result.pop("new_refresh", None))
     return result
+
+
+# ---------------- frontend (single-server mode) ----------------
+# Mounted last so the SPA catch-all never shadows the API routes above.
+mount_frontend(app)
