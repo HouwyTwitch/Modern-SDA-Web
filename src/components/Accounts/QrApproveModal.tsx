@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Camera, Check, X, Loader2, ClipboardPaste } from "lucide-react";
+import jsQR from "jsqr";
 import { Modal } from "../common/Modal";
 import { useStore } from "../../store/useStore";
 import type { Account } from "../../types";
@@ -10,8 +11,18 @@ interface Props {
   onClose: () => void;
 }
 
-// BarcodeDetector is available in Chromium-based browsers; we degrade gracefully.
-type BD = { detect: (s: CanvasImageSource) => Promise<{ rawValue: string }[]> };
+/** Decode a QR code from any image source using jsQR (pure JS, all browsers). */
+function decodeFromSource(source: CanvasImageSource, w: number, h: number): string | null {
+  if (!w || !h) return null;
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return null;
+  ctx.drawImage(source, 0, 0, w, h);
+  const { data } = ctx.getImageData(0, 0, w, h);
+  return jsQR(data, w, h)?.data ?? null;
+}
 
 export function QrApproveModal({ account, open, onClose }: Props) {
   const qrApprove = useStore((s) => s.qrApprove);
@@ -22,25 +33,17 @@ export function QrApproveModal({ account, open, onClose }: Props) {
   const [scanning, setScanning] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const rafRef = useRef<number>();
 
-  const detectorSupported = typeof window !== "undefined" && "BarcodeDetector" in window;
-
-  /** Decode a QR code from an image blob (clipboard paste). */
   async function decodeImage(blob?: Blob | null) {
     if (!blob) return;
-    if (!detectorSupported) {
-      setError("Reading QR from images needs a Chromium-based browser.");
-      return;
-    }
     setError(undefined);
     try {
       const bitmap = await createImageBitmap(blob);
-      // @ts-expect-error BarcodeDetector is not yet in TS DOM lib
-      const detector: BD = new window.BarcodeDetector({ formats: ["qr_code"] });
-      const codes = await detector.detect(bitmap);
+      const result = decodeFromSource(bitmap, bitmap.width, bitmap.height);
       bitmap.close?.();
-      if (codes.length > 0) {
-        setUrl(codes[0].rawValue);
+      if (result) {
+        setUrl(result);
         pushToast("QR loaded from image", "success");
       } else {
         setError("No QR code found in the image.");
@@ -74,6 +77,7 @@ export function QrApproveModal({ account, open, onClose }: Props) {
   }
 
   function stopScan() {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     setScanning(false);
@@ -95,30 +99,24 @@ export function QrApproveModal({ account, open, onClose }: Props) {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
       streamRef.current = stream;
       setScanning(true);
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-      }
-      // @ts-expect-error BarcodeDetector is not yet in TS DOM lib
-      const detector: BD = new window.BarcodeDetector({ formats: ["qr_code"] });
-      const loop = async () => {
+      const video = videoRef.current!;
+      video.srcObject = stream;
+      await video.play();
+      const loop = () => {
         if (!streamRef.current || !videoRef.current) return;
-        try {
-          const codes = await detector.detect(videoRef.current);
-          if (codes.length > 0) {
-            setUrl(codes[0].rawValue);
-            pushToast("QR detected", "success");
-            stopScan();
-            return;
-          }
-        } catch {
-          /* frame not ready */
+        const v = videoRef.current;
+        const result = decodeFromSource(v, v.videoWidth, v.videoHeight);
+        if (result) {
+          setUrl(result);
+          pushToast("QR detected", "success");
+          stopScan();
+          return;
         }
-        requestAnimationFrame(loop);
+        rafRef.current = requestAnimationFrame(loop);
       };
-      requestAnimationFrame(loop);
+      rafRef.current = requestAnimationFrame(loop);
     } catch {
-      setError("Could not access camera. Paste the challenge URL instead.");
+      setError("Could not access camera. Paste the QR image or link instead.");
       setScanning(false);
     }
   }
@@ -167,11 +165,9 @@ export function QrApproveModal({ account, open, onClose }: Props) {
         <button onClick={pasteFromClipboard} className="btn-ghost !px-2 text-xs text-accent">
           <ClipboardPaste size={14} /> Paste image from clipboard
         </button>
-        {detectorSupported && (
-          <button onClick={scanning ? stopScan : startScan} className="btn-ghost !px-2 text-xs text-accent">
-            <Camera size={14} /> {scanning ? "Stop camera" : "Scan with camera"}
-          </button>
-        )}
+        <button onClick={scanning ? stopScan : startScan} className="btn-ghost !px-2 text-xs text-accent">
+          <Camera size={14} /> {scanning ? "Stop camera" : "Scan with camera"}
+        </button>
         <span className="ml-auto text-xs text-ink-faint">{account.name}</span>
       </div>
 

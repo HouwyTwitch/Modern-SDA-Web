@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { initials } from "../../lib/format";
 
 interface Props {
@@ -10,6 +10,8 @@ interface Props {
 
 export function Avatar({ name, color, url, size = 44 }: Props) {
   const [failed, setFailed] = useState(false);
+  // Reset the error state when the URL changes (e.g. avatars backfilled async).
+  useEffect(() => setFailed(false), [url]);
 
   if (url && !failed) {
     return (

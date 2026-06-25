@@ -13,6 +13,7 @@ import hmac
 import json
 import re
 import time
+import xml.etree.ElementTree as ET
 from contextlib import asynccontextmanager
 from datetime import datetime
 from types import SimpleNamespace
@@ -46,22 +47,26 @@ def resolve_steam_id(secrets: dict, fallback: str) -> str:
 
 
 async def fetch_avatar(steam_id: str, proxy: str | None = None) -> str | None:
-    """Best-effort fetch of an account's public Steam avatar URL."""
+    """Best-effort fetch of an account's public Steam avatar URL.
+
+    Mirrors Modern-SDA: read the community profile XML and take <avatarFull>
+    (falling back to <avatarMedium>), parsed with ElementTree so CDATA and
+    whitespace are handled correctly.
+    """
     if not steam_id:
         return None
     proxy = proxy if (proxy and proxy.startswith("http")) else None
     try:
         async with httpx.AsyncClient(
-            timeout=8,
+            timeout=10,
             follow_redirects=True,
             proxy=proxy,
             headers={"User-Agent": "Mozilla/5.0 (compatible; ModernSDA/2)"},
         ) as c:
-            r = await c.get(f"https://steamcommunity.com/profiles/{steam_id}?xml=1")
-        m = re.search(r"<avatarFull>\s*<!\[CDATA\[(.*?)\]\]>\s*</avatarFull>", r.text, re.DOTALL)
-        if not m:
-            return None
-        return m.group(1).strip().replace("http://", "https://")
+            r = await c.get(f"https://steamcommunity.com/profiles/{steam_id}/?xml=1")
+        root = ET.fromstring(r.content)
+        avatar = (root.findtext("avatarFull") or root.findtext("avatarMedium") or "").strip()
+        return avatar.replace("http://", "https://") or None
     except Exception:
         return None
 
