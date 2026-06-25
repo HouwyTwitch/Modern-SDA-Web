@@ -1,17 +1,16 @@
-// Parse Steam `.maFile` (JSON) into an Account.
-import type { Account, MaFile } from "../types";
-import { isValidSharedSecret } from "./steamGuard";
+// Parse Steam `.maFile` (JSON) locally into the fields the backend needs.
+import type { ParsedMaFile } from "../types";
 
-const AVATAR_COLORS = [
-  "#1a9fff",
-  "#22c55e",
-  "#f59e0b",
-  "#ef4444",
-  "#a855f7",
-  "#ec4899",
-  "#14b8a6",
-  "#6366f1",
-];
+interface RawMaFile {
+  shared_secret?: string;
+  identity_secret?: string;
+  account_name?: string;
+  Session?: { SteamID?: number | string; SteamId?: number | string; steamid?: number | string };
+  steamid?: number | string;
+  steamId?: number | string;
+}
+
+const AVATAR_COLORS = ["#1a9fff", "#22c55e", "#f59e0b", "#ef4444", "#a855f7", "#ec4899", "#14b8a6", "#6366f1"];
 
 export function pickAvatarColor(seed: string): string {
   let hash = 0;
@@ -19,7 +18,16 @@ export function pickAvatarColor(seed: string): string {
   return AVATAR_COLORS[hash % AVATAR_COLORS.length];
 }
 
-function extractSteamId(ma: MaFile): string {
+function isValidSecret(secret?: string): boolean {
+  if (!secret) return false;
+  try {
+    return atob(secret.trim()).length >= 16;
+  } catch {
+    return false;
+  }
+}
+
+function extractSteamId(ma: RawMaFile): string {
   const candidates = [
     ma.Session?.SteamID,
     ma.Session?.SteamId,
@@ -27,43 +35,36 @@ function extractSteamId(ma: MaFile): string {
     ma.steamid,
     ma.steamId,
   ];
-  for (const c of candidates) {
-    if (c !== undefined && c !== null && `${c}` !== "0") return `${c}`;
-  }
+  for (const c of candidates) if (c !== undefined && c !== null && `${c}` !== "0") return `${c}`;
   return "";
 }
 
 export interface ParseResult {
-  account?: Account;
+  parsed?: ParsedMaFile;
   error?: string;
 }
 
 export function parseMaFile(text: string, fallbackName?: string): ParseResult {
-  let ma: MaFile;
+  let ma: RawMaFile;
   try {
-    ma = JSON.parse(text) as MaFile;
+    ma = JSON.parse(text);
   } catch {
     return { error: "File is not valid JSON." };
   }
-
-  if (!ma.shared_secret || !isValidSharedSecret(ma.shared_secret)) {
-    return { error: "Missing or invalid shared_secret." };
-  }
+  if (!isValidSecret(ma.shared_secret)) return { error: "Missing or invalid shared_secret." };
 
   const steamId = extractSteamId(ma);
   const name = ma.account_name || fallbackName || (steamId ? `Account ${steamId.slice(-4)}` : "New Account");
 
-  const account: Account = {
-    id: crypto.randomUUID(),
-    name,
-    steamId,
-    sharedSecret: ma.shared_secret.trim(),
-    identitySecret: ma.identity_secret?.trim(),
-    deviceId: ma.device_id,
-    avatarColor: pickAvatarColor(name + steamId),
-    status: ma.identity_secret ? "online" : "needs_login",
-    createdAt: Date.now(),
+  return {
+    parsed: {
+      name,
+      steamId,
+      shared_secret: ma.shared_secret!.trim(),
+      identity_secret: ma.identity_secret?.trim(),
+      account_name: ma.account_name,
+    },
   };
-
-  return { account };
 }
+
+export { isValidSecret };

@@ -1,7 +1,17 @@
-import { type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { NavLink, useLocation } from "react-router-dom";
-import { ShieldCheck, Users, CheckCircle2, Settings as SettingsIcon, Moon, Sun } from "lucide-react";
+import {
+  ShieldCheck,
+  Users,
+  CheckCircle2,
+  Settings as SettingsIcon,
+  Moon,
+  Sun,
+  LogOut,
+} from "lucide-react";
 import { useStore } from "../../store/useStore";
+import { useAuth } from "../../store/useAuth";
+import { useSettings } from "../../store/useSettings";
 
 const NAV = [
   { to: "/accounts", label: "Accounts", icon: Users },
@@ -12,23 +22,31 @@ const NAV = [
 export function AppLayout({ children }: { children: ReactNode }) {
   const accounts = useStore((s) => s.accounts);
   const confirmations = useStore((s) => s.confirmations);
-  const theme = useStore((s) => s.settings.theme);
-  const setSettings = useStore((s) => s.setSettings);
+  const theme = useSettings((s) => s.theme);
+  const setTheme = useSettings((s) => s.setTheme);
+  const user = useAuth((s) => s.user);
+  const logout = useAuth((s) => s.logout);
+  const reset = useStore((s) => s.reset);
   const location = useLocation();
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const counts: Record<string, number> = {
     "/accounts": accounts.length,
     "/confirmations": confirmations.length,
   };
-
   const isDark = theme !== "light";
+
+  async function doLogout() {
+    await logout();
+    reset();
+  }
 
   return (
     <div className="flex h-full">
       {/* Desktop sidebar */}
-      <aside className="hidden w-64 shrink-0 flex-col border-r border-line bg-surface-raised/40 p-4 md:flex">
+      <aside className="hidden w-64 shrink-0 flex-col border-r border-line bg-surface-raised/30 p-4 backdrop-blur-sm md:flex">
         <div className="flex items-center gap-2.5 px-2 py-3">
-          <div className="grid h-9 w-9 place-items-center rounded-xl bg-accent text-white">
+          <div className="grid h-9 w-9 place-items-center rounded-xl bg-accent text-white shadow-lg shadow-accent/30">
             <ShieldCheck size={20} />
           </div>
           <div>
@@ -43,7 +61,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
               key={to}
               to={to}
               className={({ isActive }) =>
-                `flex items-center justify-between rounded-xl px-3 py-2.5 text-sm font-medium transition ${
+                `group flex items-center justify-between rounded-xl px-3 py-2.5 text-sm font-medium transition ${
                   isActive
                     ? "bg-accent-soft text-accent"
                     : "text-ink-muted hover:bg-surface-sunken hover:text-ink"
@@ -63,25 +81,48 @@ export function AppLayout({ children }: { children: ReactNode }) {
           ))}
         </nav>
 
-        <div className="mt-auto flex items-center justify-between px-2 text-xs text-ink-faint">
-          <span>v1.0.0</span>
+        {/* User card */}
+        <div className="relative mt-auto">
           <button
-            onClick={() => setSettings({ theme: isDark ? "light" : "dark" })}
-            className="btn-ghost !p-2"
-            aria-label="Toggle theme"
+            onClick={() => setMenuOpen((v) => !v)}
+            className="flex w-full items-center gap-3 rounded-xl border border-line p-2.5 text-left transition hover:bg-surface-sunken"
           >
-            {isDark ? <Sun size={16} /> : <Moon size={16} />}
+            <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-accent/15 text-sm font-bold text-accent">
+              {user?.email?.[0]?.toUpperCase() ?? "U"}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm font-medium">{user?.email}</div>
+              <div className="text-xs text-ink-faint">Signed in</div>
+            </div>
           </button>
+          {menuOpen && (
+            <div className="absolute bottom-full left-0 mb-2 w-full animate-scale-in rounded-xl border border-line bg-surface-raised p-1 shadow-xl">
+              <button
+                onClick={() => setTheme(isDark ? "light" : "dark")}
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-ink-muted hover:bg-surface-sunken hover:text-ink"
+              >
+                {isDark ? <Sun size={16} /> : <Moon size={16} />} {isDark ? "Light mode" : "Dark mode"}
+              </button>
+              <button
+                onClick={doLogout}
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-red-400 hover:bg-red-500/10"
+              >
+                <LogOut size={16} /> Sign out
+              </button>
+            </div>
+          )}
         </div>
       </aside>
 
       {/* Main content */}
       <main className="relative flex-1 overflow-y-auto pb-24 md:pb-0">
-        <div key={location.pathname} className="animate-fade-in">{children}</div>
+        <div key={location.pathname} className="animate-fade-in">
+          {children}
+        </div>
       </main>
 
       {/* Mobile bottom nav */}
-      <nav className="fixed inset-x-0 bottom-0 z-40 flex items-center justify-around border-t border-line bg-surface-raised/90 px-2 pb-[env(safe-area-inset-bottom)] pt-2 backdrop-blur-lg md:hidden">
+      <nav className="fixed inset-x-0 bottom-0 z-40 flex items-center justify-around border-t border-line bg-surface-raised/85 px-2 pb-[env(safe-area-inset-bottom)] pt-2 backdrop-blur-xl md:hidden">
         {NAV.map(({ to, label, icon: Icon }) => (
           <NavLink
             key={to}

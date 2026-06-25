@@ -1,20 +1,4 @@
-// Shared domain types for Modern SDA Web.
-
-/** The subset of a Steam `.maFile` we care about. */
-export interface MaFile {
-  shared_secret: string;
-  identity_secret?: string;
-  account_name?: string;
-  Session?: {
-    SteamID?: number | string;
-    SteamId?: number | string;
-    steamid?: number | string;
-  };
-  device_id?: string;
-  // Steam stores the id under a couple of different keys depending on tooling.
-  steamid?: number | string;
-  steamId?: number | string;
-}
+// Shared domain types for Modern SDA Web (multi-user, backend-driven).
 
 export type AccountStatus = "online" | "expiring" | "needs_login" | "offline";
 
@@ -22,18 +6,18 @@ export interface Account {
   id: string;
   name: string;
   steamId: string;
-  /** base64 shared secret used to generate Steam Guard codes. */
-  sharedSecret: string;
-  /** base64 identity secret used to sign confirmations (optional). */
-  identitySecret?: string;
-  deviceId?: string;
   avatarColor: string;
-  proxy?: string;
+  proxy: string | null;
   status: AccountStatus;
-  favorite?: boolean;
-  lastConfirmation?: number;
-  lastLogin?: number;
+  favorite: boolean;
+  hasIdentity: boolean;
+  hasSession: boolean;
+  lastConfirmation: number | null;
+  lastLogin: number | null;
   createdAt: number;
+  // present on /api/accounts (server-generated)
+  code?: string;
+  codeExpiresIn?: number;
 }
 
 export type ConfirmationType = "trade" | "market" | "other";
@@ -43,14 +27,16 @@ export interface Confirmation {
   accountId: string;
   type: ConfirmationType;
   title: string;
-  /** Counterparty / sub-line, e.g. "Trader123" or item name. */
   subtitle: string;
-  amount?: string;
+  amount?: string | null;
   createdAt: number;
-  /** Steam confirmation identifiers, present for real (server-fetched) items. */
   nonce?: string;
-  key?: string;
   iconUrls?: string[];
+}
+
+export interface AuthUser {
+  email: string;
+  user_id: string;
 }
 
 export type ThemeMode = "dark" | "light" | "contrast" | "system";
@@ -58,17 +44,20 @@ export type ThemeMode = "dark" | "light" | "contrast" | "system";
 export interface AccentColor {
   id: string;
   label: string;
-  rgb: string; // "26 159 255"
+  rgb: string;
 }
 
 export interface Settings {
   theme: ThemeMode;
-  accent: string; // accent id
-  language: string;
-  autoLockMinutes: number; // 0 = never
-  encryptionEnabled: boolean;
-  biometrics: boolean;
-  autoConfirmTrades: boolean;
-  autoConfirmMarket: boolean;
+  accent: string;
   density: "comfortable" | "compact";
+}
+
+/** Parsed locally from a .maFile before being sent to the backend. */
+export interface ParsedMaFile {
+  name?: string;
+  steamId: string;
+  shared_secret: string;
+  identity_secret?: string;
+  account_name?: string;
 }

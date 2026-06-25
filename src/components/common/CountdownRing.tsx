@@ -1,4 +1,4 @@
-import { CODE_PERIOD } from "../../lib/steamGuard";
+const CODE_PERIOD = 30;
 
 interface Props {
   remaining: number;

@@ -54,6 +54,10 @@ body {
   @apply bg-surface text-ink font-sans antialiased;
   margin: 0;
   overscroll-behavior-y: none;
+  background-image:
+    radial-gradient(60rem 40rem at 110% -10%, rgb(var(--accent) / 0.10), transparent 60%),
+    radial-gradient(50rem 40rem at -10% 0%, rgb(var(--accent) / 0.06), transparent 55%);
+  background-attachment: fixed;
 }
 
 /* Respect users who prefer reduced motion. */
@@ -86,6 +90,15 @@ body {
 @layer components {
   .card {
     @apply rounded-2xl border border-line bg-surface-raised;
+  }
+  .glass {
+    @apply border border-line/80 bg-surface-raised/70 backdrop-blur-xl;
+  }
+  .gradient-text {
+    @apply bg-gradient-to-br from-ink to-ink-muted bg-clip-text text-transparent;
+  }
+  .hover-lift {
+    @apply transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/20;
   }
   .btn {
     @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold

@@ -32,6 +32,13 @@ server/__pycache__/
 *.pyc
 .env
 .env.*
+# Local DB + dev secrets (never commit)
+server/*.db
+server/.dev_master.key
+server/.dev_jwt.key
 
 # Misc
 _shot.mjs
+
+# TS build info
+*.tsbuildinfo

@@ -1,11 +1,11 @@
 import { useEffect } from "react";
-import { useStore } from "../store/useStore";
+import { useSettings } from "../store/useSettings";
 import { accentById } from "../data/accents";
 
 /** Applies the selected theme class + accent color to <html>, reacting live. */
 export function useTheme() {
-  const theme = useStore((s) => s.settings.theme);
-  const accent = useStore((s) => s.settings.accent);
+  const theme = useSettings((s) => s.theme);
+  const accent = useSettings((s) => s.accent);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -18,7 +18,6 @@ export function useTheme() {
       root.classList.add(effective);
     };
     apply();
-
     if (theme === "system") {
       const mq = window.matchMedia("(prefers-color-scheme: dark)");
       mq.addEventListener("change", apply);

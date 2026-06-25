@@ -1,56 +1,29 @@
 import { useState } from "react";
-import { X, Copy, Eye, EyeOff, Star, Trash2, Check } from "lucide-react";
+import { X, Star, Trash2, LogIn, QrCode, Eye, KeyRound, ShieldCheck, ShieldAlert } from "lucide-react";
 import type { Account } from "../../types";
 import { Avatar } from "../common/Avatar";
 import { StatusBadge } from "../common/StatusBadge";
 import { CountdownRing } from "../common/CountdownRing";
 import { CodeDisplay } from "../common/CodeDisplay";
 import { useStore } from "../../store/useStore";
-import { maskSecret, timeAgo } from "../../lib/format";
-import type { CodeState } from "../../hooks/useSteamCodes";
+import { timeAgo } from "../../lib/format";
+import { SteamLinkModal } from "./SteamLinkModal";
+import { QrApproveModal } from "./QrApproveModal";
+import { RevealModal } from "./RevealModal";
 
 interface Props {
   account: Account;
-  code?: CodeState;
+  remaining: number;
   onClose: () => void;
 }
 
-function SecretRow({ label, value }: { label: string; value?: string }) {
-  const [shown, setShown] = useState(false);
-  const [copied, setCopied] = useState(false);
-  return (
-    <div className="flex items-center justify-between gap-2 py-2">
-      <span className="text-sm text-ink-muted">{label}</span>
-      <div className="flex items-center gap-2">
-        <span className="max-w-[140px] truncate font-mono text-sm">
-          {shown ? value || "—" : maskSecret(value)}
-        </span>
-        {value && (
-          <>
-            <button onClick={() => setShown((v) => !v)} className="text-ink-faint hover:text-ink">
-              {shown ? <EyeOff size={15} /> : <Eye size={15} />}
-            </button>
-            <button
-              onClick={async () => {
-                await navigator.clipboard.writeText(value);
-                setCopied(true);
-                setTimeout(() => setCopied(false), 1200);
-              }}
-              className="text-ink-faint hover:text-ink"
-            >
-              {copied ? <Check size={15} className="text-green-400" /> : <Copy size={15} />}
-            </button>
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
-export function AccountDetail({ account, code, onClose }: Props) {
+export function AccountDetail({ account, remaining, onClose }: Props) {
   const toggleFavorite = useStore((s) => s.toggleFavorite);
-  const removeAccount = useStore((s) => s.removeAccount);
+  const deleteAccount = useStore((s) => s.deleteAccount);
   const pushToast = useStore((s) => s.pushToast);
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [qrOpen, setQrOpen] = useState(false);
+  const [revealOpen, setRevealOpen] = useState(false);
 
   return (
     <>
@@ -73,70 +46,105 @@ export function AccountDetail({ account, code, onClose }: Props) {
         </div>
 
         <div className="flex-1 overflow-y-auto p-4">
-          <div className="card bg-surface-sunken p-5">
-            <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-faint">
-              Current Code
-            </div>
+          <div className="card bg-gradient-to-br from-surface-sunken to-surface-sunken/40 p-5">
+            <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-faint">Current Code</div>
             <div className="flex items-center justify-between">
-              <CodeDisplay
-                code={code?.code ?? "•••••"}
-                size="xl"
-                onCopy={() => pushToast("Code copied", "success")}
-              />
-              <CountdownRing remaining={code?.remaining ?? 30} size={56} />
+              <CodeDisplay code={account.code ?? "•••••"} size="xl" onCopy={() => pushToast("Code copied", "success")} />
+              <CountdownRing remaining={remaining} size={56} />
+            </div>
+          </div>
+
+          {/* Session status banner */}
+          <div
+            className={`mt-4 flex items-center gap-3 rounded-xl border p-3 ${
+              account.hasSession
+                ? "border-green-500/20 bg-green-500/5 text-green-400"
+                : "border-amber-500/20 bg-amber-500/5 text-amber-400"
+            }`}
+          >
+            {account.hasSession ? <ShieldCheck size={18} /> : <ShieldAlert size={18} />}
+            <div className="flex-1 text-sm">
+              <div className="font-semibold text-ink">
+                {account.hasSession ? "Steam session active" : "Not signed in to Steam"}
+              </div>
+              <div className="text-xs text-ink-muted">
+                {account.hasSession
+                  ? "Live confirmations & QR approval are available."
+                  : "Sign in to enable confirmations and QR login approval."}
+              </div>
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            <button onClick={() => setLinkOpen(true)} className="btn-ghost border border-line">
+              <LogIn size={16} /> {account.hasSession ? "Re-link Steam" : "Sign in to Steam"}
+            </button>
+            <button
+              onClick={() => (account.hasSession ? setQrOpen(true) : pushToast("Sign in to Steam first", "info"))}
+              className="btn-ghost border border-line"
+            >
+              <QrCode size={16} /> Approve QR login
+            </button>
+            <button onClick={() => setRevealOpen(true)} className="btn-ghost border border-line">
+              <Eye size={16} /> Reveal secrets
+            </button>
+            <button onClick={() => toggleFavorite(account.id)} className="btn-ghost border border-line">
+              <Star size={16} className={account.favorite ? "fill-amber-400 text-amber-400" : ""} />
+              {account.favorite ? "Unfavorite" : "Favorite"}
+            </button>
+          </div>
+
+          <div className="mt-5">
+            <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-ink-faint">Details</div>
+            <div className="divide-y divide-line">
+              <Row label="SteamID" value={account.steamId || "—"} mono />
+              <Row label="Identity secret" value={account.hasIdentity ? "Stored (encrypted)" : "Not provided"} />
+              <Row label="Refresh token" value={account.hasSession ? "Stored (encrypted)" : "None"} />
+              <Row label="Proxy" value={account.proxy ?? "No proxy"} />
             </div>
           </div>
 
           <div className="mt-5">
-            <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-ink-faint">
-              Account Details
-            </div>
+            <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-ink-faint">Activity</div>
             <div className="divide-y divide-line">
-              <SecretRow label="SteamID" value={account.steamId || "—"} />
-              <SecretRow label="Shared Secret" value={account.sharedSecret} />
-              <SecretRow label="Identity Secret" value={account.identitySecret} />
-              <div className="flex items-center justify-between py-2">
-                <span className="text-sm text-ink-muted">Proxy</span>
-                <span className="text-sm">{account.proxy ?? "No proxy"}</span>
-              </div>
+              <Row label="Last confirmation" value={timeAgo(account.lastConfirmation ?? undefined)} />
+              <Row label="Last login" value={timeAgo(account.lastLogin ?? undefined)} />
             </div>
           </div>
 
-          <div className="mt-5">
-            <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-ink-faint">
-              Activity
-            </div>
-            <div className="divide-y divide-line">
-              <div className="flex items-center justify-between py-2">
-                <span className="text-sm text-ink-muted">Last confirmation</span>
-                <span className="text-sm">{timeAgo(account.lastConfirmation)}</span>
-              </div>
-              <div className="flex items-center justify-between py-2">
-                <span className="text-sm text-ink-muted">Last login</span>
-                <span className="text-sm">{timeAgo(account.lastLogin)}</span>
-              </div>
-            </div>
+          <div className="mt-5 flex items-center gap-2 rounded-xl bg-surface-sunken px-3 py-2.5 text-xs text-ink-faint">
+            <KeyRound size={14} /> Secrets are sealed — decryptable only by you or the server.
           </div>
         </div>
 
-        <div className="flex gap-2 border-t border-line p-4">
-          <button onClick={() => toggleFavorite(account.id)} className="btn-ghost flex-1 border border-line">
-            <Star size={16} className={account.favorite ? "fill-amber-400 text-amber-400" : ""} />
-            {account.favorite ? "Unfavorite" : "Favorite"}
-          </button>
+        <div className="border-t border-line p-4">
           <button
             onClick={() => {
               if (confirm(`Remove ${account.name}? This cannot be undone.`)) {
-                removeAccount(account.id);
+                void deleteAccount(account.id);
                 onClose();
               }
             }}
-            className="btn-danger flex-1"
+            className="btn-danger w-full"
           >
-            <Trash2 size={16} /> Remove
+            <Trash2 size={16} /> Remove account
           </button>
         </div>
       </div>
+
+      <SteamLinkModal account={account} open={linkOpen} onClose={() => setLinkOpen(false)} />
+      <QrApproveModal account={account} open={qrOpen} onClose={() => setQrOpen(false)} />
+      <RevealModal account={account} open={revealOpen} onClose={() => setRevealOpen(false)} />
     </>
+  );
+}
+
+function Row({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="flex items-center justify-between gap-2 py-2.5">
+      <span className="text-sm text-ink-muted">{label}</span>
+      <span className={`max-w-[180px] truncate text-sm ${mono ? "font-mono" : ""}`}>{value}</span>
+    </div>
   );
 }

@@ -1,34 +1,47 @@
 import { useEffect } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
+import { ShieldCheck } from "lucide-react";
+import { useAuth } from "./store/useAuth";
 import { useStore } from "./store/useStore";
 import { useTheme } from "./hooks/useTheme";
-import { useAutoLock } from "./hooks/useAutoLock";
 import { AppLayout } from "./components/Layout/AppLayout";
 import { Toasts } from "./components/common/Toasts";
-import { LockScreen } from "./components/LockScreen";
+import { LoginPage } from "./pages/LoginPage";
 import { AccountsPage } from "./pages/AccountsPage";
 import { ConfirmationsPage } from "./pages/ConfirmationsPage";
 import { SettingsPage } from "./pages/SettingsPage";
 
 export default function App() {
-  const init = useStore((s) => s.init);
-  const locked = useStore((s) => s.locked);
-  const initialized = useStore((s) => s.initialized);
+  const status = useAuth((s) => s.status);
+  const initAuth = useAuth((s) => s.init);
+  const loadAccounts = useStore((s) => s.loadAccounts);
 
   useTheme();
-  useAutoLock();
 
   useEffect(() => {
-    init();
-  }, [init]);
+    void initAuth();
+  }, [initAuth]);
 
-  if (!initialized) return null;
+  useEffect(() => {
+    if (status === "authed") void loadAccounts();
+  }, [status, loadAccounts]);
+
+  if (status === "loading") {
+    return (
+      <div className="grid h-full place-items-center">
+        <div className="flex flex-col items-center gap-3 text-ink-muted">
+          <div className="grid h-12 w-12 animate-pulse place-items-center rounded-2xl bg-accent text-white">
+            <ShieldCheck size={26} />
+          </div>
+          <span className="text-sm">Loading…</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <>
-      {locked ? (
-        <LockScreen />
-      ) : (
+      {status === "authed" ? (
         <AppLayout>
           <Routes>
             <Route path="/" element={<Navigate to="/accounts" replace />} />
@@ -38,6 +51,8 @@ export default function App() {
             <Route path="*" element={<Navigate to="/accounts" replace />} />
           </Routes>
         </AppLayout>
+      ) : (
+        <LoginPage />
       )}
       <Toasts />
     </>

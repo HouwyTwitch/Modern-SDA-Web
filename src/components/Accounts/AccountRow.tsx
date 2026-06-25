@@ -5,21 +5,20 @@ import { Avatar } from "../common/Avatar";
 import { StatusBadge } from "../common/StatusBadge";
 import { CountdownRing } from "../common/CountdownRing";
 import { CodeDisplay } from "../common/CodeDisplay";
-import type { CodeState } from "../../hooks/useSteamCodes";
 
 interface Props {
   account: Account;
-  code?: CodeState;
+  remaining: number;
   onOpen: () => void;
 }
 
-export function AccountRow({ account, code, onOpen }: Props) {
+export function AccountRow({ account, remaining, onOpen }: Props) {
   const [copied, setCopied] = useState(false);
+  const code = account.code ?? "•••••";
 
   async function copyCode(e: React.MouseEvent) {
     e.stopPropagation();
-    if (!code) return;
-    await navigator.clipboard.writeText(code.code);
+    await navigator.clipboard.writeText(code);
     setCopied(true);
     setTimeout(() => setCopied(false), 1200);
   }
@@ -27,7 +26,7 @@ export function AccountRow({ account, code, onOpen }: Props) {
   return (
     <button
       onClick={onOpen}
-      className="card group flex w-full items-center gap-3 p-3 text-left transition hover:border-accent/50 hover:bg-surface-sunken/50 sm:gap-4 sm:p-4"
+      className="card hover-lift group flex w-full items-center gap-3 p-3 text-left hover:border-accent/50 sm:gap-4 sm:p-4"
     >
       <Avatar name={account.name} color={account.avatarColor} size={48} />
 
@@ -39,20 +38,16 @@ export function AccountRow({ account, code, onOpen }: Props) {
         <div className="truncate font-mono text-xs text-ink-faint">{account.steamId || "—"}</div>
         <div className="mt-1.5 flex items-center gap-3">
           <StatusBadge status={account.status} />
-          {account.proxy && (
-            <span className="hidden text-xs text-ink-faint sm:inline">· {account.proxy}</span>
-          )}
+          {account.proxy && <span className="hidden text-xs text-ink-faint sm:inline">· {account.proxy}</span>}
         </div>
       </div>
 
       <div className="flex items-center gap-3 sm:gap-4">
         <div onClick={copyCode} className="hidden sm:block" role="button" tabIndex={-1}>
-          <CodeDisplay code={code?.code ?? "•••••"} size="md" />
+          <CodeDisplay code={code} size="md" />
         </div>
-        <span className="font-mono text-xl font-bold tracking-wider text-accent sm:hidden">
-          {code?.code ?? "•••••"}
-        </span>
-        <CountdownRing remaining={code?.remaining ?? 30} />
+        <span className="font-mono text-xl font-bold tracking-wider text-accent sm:hidden">{code}</span>
+        <CountdownRing remaining={remaining} />
         <span
           onClick={copyCode}
           className="hidden text-ink-faint opacity-0 transition hover:text-ink group-hover:opacity-100 sm:inline"

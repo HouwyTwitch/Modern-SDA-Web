@@ -1,21 +1,9 @@
-import { useRef, useState, type ReactNode } from "react";
-import {
-  Palette,
-  Globe,
-  Sun,
-  Lock,
-  KeyRound,
-  Clock,
-  Fingerprint,
-  Download,
-  Upload,
-  Zap,
-  ChevronRight,
-  Check,
-} from "lucide-react";
+import { type ReactNode } from "react";
+import { Palette, Sun, ShieldCheck, LogOut, Lock, Server, User } from "lucide-react";
+import { useSettings } from "../store/useSettings";
+import { useAuth } from "../store/useAuth";
 import { useStore } from "../store/useStore";
 import { ACCENTS } from "../data/accents";
-import { Modal } from "../components/common/Modal";
 import type { ThemeMode } from "../types";
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
@@ -27,66 +15,23 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-function Row({
-  icon,
-  label,
-  children,
-  onClick,
-}: {
-  icon: ReactNode;
-  label: string;
-  children?: ReactNode;
-  onClick?: () => void;
-}) {
-  const Comp = onClick ? "button" : "div";
+function Row({ icon, label, children }: { icon: ReactNode; label: string; children?: ReactNode }) {
   return (
-    <Comp
-      onClick={onClick}
-      className={`flex w-full items-center gap-3 px-4 py-3.5 text-left ${
-        onClick ? "transition hover:bg-surface-sunken/60" : ""
-      }`}
-    >
+    <div className="flex w-full items-center gap-3 px-4 py-3.5">
       <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-surface-sunken text-ink-muted">
         {icon}
       </span>
       <span className="flex-1 text-sm font-medium">{label}</span>
       <span className="flex items-center gap-2 text-sm text-ink-muted">{children}</span>
-    </Comp>
-  );
-}
-
-function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <button
-      onClick={(e) => {
-        e.stopPropagation();
-        onChange(!on);
-      }}
-      className={`relative h-6 w-11 shrink-0 rounded-full transition ${on ? "bg-accent" : "bg-surface-sunken"}`}
-      role="switch"
-      aria-checked={on}
-    >
-      <span
-        className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${
-          on ? "left-[1.375rem]" : "left-0.5"
-        }`}
-      />
-    </button>
+    </div>
   );
 }
 
 export function SettingsPage() {
-  const settings = useStore((s) => s.settings);
-  const setSettings = useStore((s) => s.setSettings);
-  const enableEncryption = useStore((s) => s.enableEncryption);
-  const disableEncryption = useStore((s) => s.disableEncryption);
-  const exportVault = useStore((s) => s.exportVault);
-  const addAccount = useStore((s) => s.addAccount);
-  const pushToast = useStore((s) => s.pushToast);
-  const lock = useStore((s) => s.lock);
-
-  const [pwModal, setPwModal] = useState(false);
-  const importRef = useRef<HTMLInputElement>(null);
+  const { theme, accent, setTheme, setAccent } = useSettings();
+  const user = useAuth((s) => s.user);
+  const logout = useAuth((s) => s.logout);
+  const reset = useStore((s) => s.reset);
 
   const themes: { id: ThemeMode; label: string }[] = [
     { id: "system", label: "System" },
@@ -95,41 +40,29 @@ export function SettingsPage() {
     { id: "contrast", label: "Contrast" },
   ];
 
-  function handleExport() {
-    const blob = new Blob([exportVault()], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `modern-sda-backup-${Date.now()}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    pushToast("Backup exported", "success");
-  }
-
-  async function handleImport(file?: File) {
-    if (!file) return;
-    try {
-      const data = JSON.parse(await file.text());
-      const accounts = Array.isArray(data) ? data : data.accounts;
-      if (!Array.isArray(accounts)) throw new Error();
-      let n = 0;
-      for (const a of accounts) {
-        if (a.sharedSecret) {
-          addAccount({ ...a, id: crypto.randomUUID() });
-          n++;
-        }
-      }
-      pushToast(`Imported ${n} account${n !== 1 ? "s" : ""}`, "success");
-    } catch {
-      pushToast("Invalid backup file", "error");
-    }
-  }
-
   return (
     <div className="mx-auto max-w-2xl p-4 sm:p-6">
       <h1 className="text-2xl font-bold sm:text-3xl">Settings</h1>
 
-      <Section title="General">
+      <Section title="Account">
+        <Row icon={<User size={18} />} label="Signed in as">
+          {user?.email}
+        </Row>
+        <button
+          onClick={async () => {
+            await logout();
+            reset();
+          }}
+          className="flex w-full items-center gap-3 px-4 py-3.5 text-left transition hover:bg-red-500/5"
+        >
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-red-500/10 text-red-400">
+            <LogOut size={18} />
+          </span>
+          <span className="flex-1 text-sm font-medium text-red-400">Sign out</span>
+        </button>
+      </Section>
+
+      <Section title="Appearance">
         <div className="px-4 py-3.5">
           <div className="mb-3 flex items-center gap-3">
             <span className="grid h-9 w-9 place-items-center rounded-lg bg-surface-sunken text-ink-muted">
@@ -141,11 +74,9 @@ export function SettingsPage() {
             {themes.map((t) => (
               <button
                 key={t.id}
-                onClick={() => setSettings({ theme: t.id })}
+                onClick={() => setTheme(t.id)}
                 className={`rounded-xl border py-2 text-xs font-semibold transition ${
-                  settings.theme === t.id
-                    ? "border-accent bg-accent-soft text-accent"
-                    : "border-line text-ink-muted hover:text-ink"
+                  theme === t.id ? "border-accent bg-accent-soft text-accent" : "border-line text-ink-muted hover:text-ink"
                 }`}
               >
                 {t.label}
@@ -165,141 +96,42 @@ export function SettingsPage() {
             {ACCENTS.map((a) => (
               <button
                 key={a.id}
-                onClick={() => setSettings({ accent: a.id })}
+                onClick={() => setAccent(a.id)}
                 className={`grid h-9 w-9 place-items-center rounded-full transition ${
-                  settings.accent === a.id ? "ring-2 ring-offset-2 ring-offset-surface-raised" : ""
+                  accent === a.id ? "ring-2 ring-offset-2 ring-offset-surface-raised" : ""
                 }`}
-                style={{ backgroundColor: `rgb(${a.rgb})`, ...(settings.accent === a.id ? { ["--tw-ring-color" as string]: `rgb(${a.rgb})` } : {}) }}
+                style={{
+                  backgroundColor: `rgb(${a.rgb})`,
+                  ...(accent === a.id ? { ["--tw-ring-color" as string]: `rgb(${a.rgb})` } : {}),
+                }}
                 aria-label={a.label}
               >
-                {settings.accent === a.id && <Check size={16} className="text-white" />}
+                {accent === a.id && <span className="text-white">✓</span>}
               </button>
             ))}
           </div>
         </div>
-
-        <Row icon={<Globe size={18} />} label="Language">
-          {settings.language} <ChevronRight size={16} className="text-ink-faint" />
-        </Row>
       </Section>
 
       <Section title="Security">
-        <Row icon={<Lock size={18} />} label="Local Encryption">
-          <Toggle
-            on={settings.encryptionEnabled}
-            onChange={(v) => {
-              if (v) setPwModal(true);
-              else if (confirm("Disable encryption? Secrets will be stored unencrypted.")) disableEncryption();
-            }}
-          />
+        <Row icon={<Lock size={18} />} label="Vault encryption">
+          <span className="chip bg-green-500/10 text-green-400">AES-256-GCM</span>
         </Row>
-        <Row icon={<KeyRound size={18} />} label="Master Password" onClick={() => setPwModal(true)}>
-          {settings.encryptionEnabled ? "Set" : "Not set"} <ChevronRight size={16} className="text-ink-faint" />
+        <Row icon={<ShieldCheck size={18} />} label="Key derivation">
+          scrypt
         </Row>
-        <Row icon={<Clock size={18} />} label="Auto Lock">
-          <select
-            value={settings.autoLockMinutes}
-            onChange={(e) => setSettings({ autoLockMinutes: Number(e.target.value) })}
-            className="bg-transparent text-right text-sm font-medium outline-none"
-          >
-            <option value={0}>Never</option>
-            <option value={1}>1 minute</option>
-            <option value={5}>5 minutes</option>
-            <option value={15}>15 minutes</option>
-            <option value={60}>1 hour</option>
-          </select>
-        </Row>
-        <Row icon={<Fingerprint size={18} />} label="Lock now" onClick={lock}>
-          <ChevronRight size={16} className="text-ink-faint" />
+        <Row icon={<Server size={18} />} label="Who can decrypt">
+          You or the server
         </Row>
       </Section>
 
-      <Section title="Auto-Confirm">
-        <Row icon={<Zap size={18} />} label="Auto-confirm trades">
-          <Toggle on={settings.autoConfirmTrades} onChange={(v) => setSettings({ autoConfirmTrades: v })} />
-        </Row>
-        <Row icon={<Zap size={18} />} label="Auto-confirm market">
-          <Toggle on={settings.autoConfirmMarket} onChange={(v) => setSettings({ autoConfirmMarket: v })} />
-        </Row>
-      </Section>
-
-      <Section title="Storage">
-        <Row icon={<Download size={18} />} label="Export Backup" onClick={handleExport}>
-          JSON <ChevronRight size={16} className="text-ink-faint" />
-        </Row>
-        <Row icon={<Upload size={18} />} label="Import Backup" onClick={() => importRef.current?.click()}>
-          From file <ChevronRight size={16} className="text-ink-faint" />
-        </Row>
-      </Section>
-
-      <input
-        ref={importRef}
-        type="file"
-        accept="application/json,.json"
-        className="hidden"
-        onChange={(e) => void handleImport(e.target.files?.[0])}
-      />
-
-      <p className="mt-6 text-center text-xs text-ink-faint">
-        Modern SDA Web v1.0.0 · Codes generated locally with Web Crypto
+      <p className="mt-6 rounded-xl bg-surface-sunken px-4 py-3 text-xs text-ink-faint">
+        Each account's secrets are sealed with a per-account data key that is wrapped twice — once
+        with your password-derived key, once with the server's master key. Codes are generated
+        server-side and never expose your secrets to the browser unless you explicitly reveal them.
       </p>
 
-      <MasterPasswordModal open={pwModal} onClose={() => setPwModal(false)} onSet={enableEncryption} />
+      <p className="mt-4 text-center text-xs text-ink-faint">Modern SDA Web v2.0.0</p>
     </div>
-  );
-}
-
-function MasterPasswordModal({
-  open,
-  onClose,
-  onSet,
-}: {
-  open: boolean;
-  onClose: () => void;
-  onSet: (pw: string) => Promise<void>;
-}) {
-  const [pw, setPw] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [error, setError] = useState<string>();
-
-  async function submit() {
-    if (pw.length < 6) return setError("Use at least 6 characters.");
-    if (pw !== confirm) return setError("Passwords don't match.");
-    await onSet(pw);
-    setPw("");
-    setConfirm("");
-    setError(undefined);
-    onClose();
-  }
-
-  return (
-    <Modal open={open} onClose={onClose} title="Set Master Password">
-      <p className="mb-4 text-sm text-ink-muted">
-        Your vault is encrypted with AES-GCM. The password is never stored — if you lose it, your
-        secrets can't be recovered.
-      </p>
-      <div className="space-y-3">
-        <input
-          type="password"
-          className="input"
-          placeholder="Master password"
-          value={pw}
-          onChange={(e) => setPw(e.target.value)}
-          autoFocus
-        />
-        <input
-          type="password"
-          className="input"
-          placeholder="Confirm password"
-          value={confirm}
-          onChange={(e) => setConfirm(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && void submit()}
-        />
-        {error && <p className="text-sm text-red-400">{error}</p>}
-        <button onClick={() => void submit()} className="btn-accent w-full">
-          <Lock size={16} /> Encrypt vault
-        </button>
-      </div>
-    </Modal>
   );
 }

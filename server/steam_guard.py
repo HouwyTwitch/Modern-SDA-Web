@@ -56,3 +56,11 @@ def device_id(steamid: str) -> str:
     """Derive the Steam mobile device id from a steamid (android:<uuid> form)."""
     h = hashlib.sha1(steamid.encode("ascii")).hexdigest()
     return f"android:{h[0:8]}-{h[8:12]}-{h[12:16]}-{h[16:20]}-{h[20:32]}"
+
+
+def is_valid_secret(secret: str) -> bool:
+    """True if `secret` is base64 decoding to at least 16 bytes."""
+    try:
+        return len(base64.b64decode(secret, validate=True)) >= 16
+    except Exception:
+        return False

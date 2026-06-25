@@ -1,99 +1,427 @@
-"""Modern SDA Web — backend API.
+"""Modern SDA Web — multi-user backend API.
 
-Provides Steam Guard code generation and (optionally) live Steam confirmation
-syncing. Code generation works entirely offline; confirmation endpoints proxy to
-Steam's mobileconf API using credentials supplied per request — nothing is
-persisted server-side.
+- User accounts with JWT auth.
+- Per-user Steam accounts, secrets sealed with envelope encryption (only the
+  server or the owner can decrypt — see vault.py).
+- Live Steam Guard codes, confirmations, and QR-login approval via aiosteampy.
 
 Run:  uvicorn main:app --reload --port 8000
 """
 from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException
+import time
+from contextlib import asynccontextmanager
+
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-import confirmations as conf
 import steam_guard
+import steam_service as steam
+import vault
+from auth import (
+    Principal,
+    cache_user_key,
+    clear_session,
+    current_principal,
+    get_user_by_email,
+    issue_token,
+)
+from config import get_settings
+from db import get_db, init_db
+from models import SteamAccount, User
+from schemas import (
+    AccountOut,
+    AccountWithCode,
+    ActRequest,
+    AddAccountRequest,
+    AuthResponse,
+    CodeOut,
+    LoginRequest,
+    QrApproveRequest,
+    RegisterRequest,
+    RevealRequest,
+    SteamLoginRequest,
+    UpdateAccountRequest,
+)
 
-app = FastAPI(title="Modern SDA Web API", version="1.0.0")
+settings = get_settings()
 
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    await init_db()
+    yield
+
+
+app = FastAPI(title="Modern SDA Web API", version="2.0.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=settings.cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-# ---------- models ----------
-class CodeRequest(BaseModel):
-    shared_secret: str
+# ---------------- helpers ----------------
+AVATAR_COLORS = ["#1a9fff", "#22c55e", "#f59e0b", "#ef4444", "#a855f7", "#ec4899", "#14b8a6", "#6366f1"]
 
 
-class CodeResponse(BaseModel):
-    code: str
-    expires_in: int
+def _avatar_color(seed: str) -> str:
+    h = 0
+    for ch in seed:
+        h = (h * 31 + ord(ch)) & 0xFFFFFFFF
+    return AVATAR_COLORS[h % len(AVATAR_COLORS)]
 
 
-class SessionModel(BaseModel):
-    steamid: str
-    identity_secret: str
-    steam_login_secure: str = Field(..., description="Value of the steamLoginSecure cookie")
-    session_id: str = ""
-    device_id: str | None = None
-
-    def to_session(self) -> conf.Session:
-        return conf.Session(
-            steamid=self.steamid,
-            identity_secret=self.identity_secret,
-            steam_login_secure=self.steam_login_secure,
-            session_id=self.session_id,
-            device_id=self.device_id,
-        )
-
-
-class ActRequest(BaseModel):
-    session: SessionModel
-    confirmation_id: str
-    nonce: str
-    action: str  # "allow" | "cancel"
+def _account_out(a: SteamAccount) -> dict:
+    return {
+        "id": a.id,
+        "name": a.name,
+        "steamId": a.steam_id,
+        "avatarColor": a.avatar_color,
+        "proxy": a.proxy,
+        "status": a.status,
+        "favorite": a.favorite,
+        "hasIdentity": a.has_identity,
+        "hasSession": a.has_session,
+        "lastConfirmation": a.last_confirmation,
+        "lastLogin": a.last_login,
+        "createdAt": a.created_at,
+    }
 
 
-# ---------- routes ----------
+async def _get_owned_account(db: AsyncSession, principal: Principal, account_id: str) -> SteamAccount:
+    acc = await db.get(SteamAccount, account_id)
+    if not acc or acc.user_id != principal.user.id:
+        raise HTTPException(status_code=404, detail="Account not found")
+    return acc
+
+
+def _server_secrets(acc: SteamAccount) -> dict:
+    return vault.decrypt_with_server(acc.secrets_blob)
+
+
+async def _persist_new_refresh(db: AsyncSession, acc: SteamAccount, new_refresh: str | None):
+    """If a Steam operation produced a fresh refresh token, re-seal it."""
+    if not new_refresh:
+        return
+    # Re-seal using server key only path: we need a user_key to rewrap. Reuse the
+    # existing user-wrapped DEK by re-encrypting with server key derivation is not
+    # possible without user_key, so we keep the existing blob's DEK.
+    blob = vault.json.loads(acc.secrets_blob)
+    dek = vault._open(get_settings().server_master_key, blob["dek_srv"])
+    blob["fields"]["refresh_token"] = vault._seal(dek, new_refresh.encode("utf-8"))
+    acc.secrets_blob = vault.json.dumps(blob, separators=(",", ":"))
+    acc.has_session = True
+    acc.last_login = time.time()
+    await db.commit()
+
+
+# ---------------- health ----------------
 @app.get("/api/health")
-def health() -> dict:
-    return {"status": "ok", "service": "modern-sda-web"}
+async def health():
+    return {"status": "ok", "service": "modern-sda-web", "version": "2.0.0"}
 
 
-@app.post("/api/code", response_model=CodeResponse)
-def code(req: CodeRequest) -> CodeResponse:
+# ---------------- auth ----------------
+@app.post("/api/auth/register", response_model=AuthResponse)
+async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
+    email = req.email.strip().lower()
+    if await get_user_by_email(db, email):
+        raise HTTPException(status_code=409, detail="Email already registered")
+    pw_salt = vault.new_salt()
+    enc_salt = vault.new_salt()
+    user = User(
+        email=email,
+        password_hash=vault.hash_password(req.password, pw_salt),
+        password_salt=pw_salt,
+        enc_salt=enc_salt,
+    )
+    db.add(user)
+    await db.commit()
+    token, sid = issue_token(user.id)
+    cache_user_key(sid, vault.derive_key(req.password, enc_salt))
+    return AuthResponse(token=token, email=user.email, user_id=user.id)
+
+
+@app.post("/api/auth/login", response_model=AuthResponse)
+async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
+    user = await get_user_by_email(db, req.email.strip().lower())
+    if not user or not vault.verify_password(req.password, user.password_salt, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    token, sid = issue_token(user.id)
+    cache_user_key(sid, vault.derive_key(req.password, user.enc_salt))
+    return AuthResponse(token=token, email=user.email, user_id=user.id)
+
+
+@app.get("/api/auth/me")
+async def me(principal: Principal = Depends(current_principal)):
+    return {"email": principal.user.email, "user_id": principal.user.id, "unlocked": principal.user_key is not None}
+
+
+@app.post("/api/auth/logout")
+async def logout(principal: Principal = Depends(current_principal)):
+    clear_session(principal.sid)
+    return {"ok": True}
+
+
+# ---------------- accounts ----------------
+@app.get("/api/accounts", response_model=list[AccountWithCode])
+async def list_accounts(
+    principal: Principal = Depends(current_principal), db: AsyncSession = Depends(get_db)
+):
+    res = await db.execute(
+        select(SteamAccount)
+        .where(SteamAccount.user_id == principal.user.id)
+        .order_by(SteamAccount.favorite.desc(), SteamAccount.sort_index, SteamAccount.created_at)
+    )
+    accounts = res.scalars().all()
+    out = []
+    for a in accounts:
+        secrets = _server_secrets(a)
+        code = steam_guard.generate_code(secrets["shared_secret"]) if secrets.get("shared_secret") else "•••••"
+        out.append({**_account_out(a), "code": code, "codeExpiresIn": steam_guard.seconds_remaining()})
+    return out
+
+
+@app.get("/api/accounts/codes", response_model=list[CodeOut])
+async def list_codes(
+    principal: Principal = Depends(current_principal), db: AsyncSession = Depends(get_db)
+):
+    res = await db.execute(select(SteamAccount).where(SteamAccount.user_id == principal.user.id))
+    rem = steam_guard.seconds_remaining()
+    out = []
+    for a in res.scalars().all():
+        secrets = _server_secrets(a)
+        code = steam_guard.generate_code(secrets["shared_secret"]) if secrets.get("shared_secret") else "•••••"
+        out.append({"id": a.id, "code": code, "codeExpiresIn": rem})
+    return out
+
+
+@app.post("/api/accounts", response_model=AccountOut)
+async def add_account(
+    req: AddAccountRequest,
+    principal: Principal = Depends(current_principal),
+    db: AsyncSession = Depends(get_db),
+):
+    user_key = principal.user_key
+    if user_key is None:
+        raise HTTPException(status_code=401, detail="Session locked — please sign in again")
+    if not steam_guard.is_valid_secret(req.shared_secret):
+        raise HTTPException(status_code=400, detail="Invalid shared_secret")
+
+    name = (req.name or req.account_name or (f"Account {req.steamId[-4:]}" if req.steamId else "New Account")).strip()
+    fields = {
+        "shared_secret": req.shared_secret.strip(),
+        "identity_secret": (req.identity_secret or "").strip() or None,
+        "account_name": (req.account_name or "").strip() or None,
+        "password": req.password or None,
+        "refresh_token": req.refresh_token or None,
+    }
+    acc = SteamAccount(
+        user_id=principal.user.id,
+        name=name,
+        steam_id=req.steamId.strip(),
+        avatar_color=_avatar_color(name + req.steamId),
+        proxy=req.proxy,
+        has_identity=bool(fields["identity_secret"]),
+        has_session=bool(fields["refresh_token"]),
+        status="online" if fields["refresh_token"] else ("needs_login" if not fields["identity_secret"] else "offline"),
+        secrets_blob=vault.encrypt_secrets(fields, user_key),
+    )
+    db.add(acc)
+    await db.commit()
+    return _account_out(acc)
+
+
+@app.patch("/api/accounts/{account_id}", response_model=AccountOut)
+async def update_account(
+    account_id: str,
+    req: UpdateAccountRequest,
+    principal: Principal = Depends(current_principal),
+    db: AsyncSession = Depends(get_db),
+):
+    acc = await _get_owned_account(db, principal, account_id)
+    if req.name is not None:
+        acc.name = req.name.strip() or acc.name
+    if req.proxy is not None:
+        acc.proxy = req.proxy or None
+    if req.favorite is not None:
+        acc.favorite = req.favorite
+    await db.commit()
+    return _account_out(acc)
+
+
+@app.delete("/api/accounts/{account_id}")
+async def delete_account(
+    account_id: str,
+    principal: Principal = Depends(current_principal),
+    db: AsyncSession = Depends(get_db),
+):
+    acc = await _get_owned_account(db, principal, account_id)
+    await db.delete(acc)
+    await db.commit()
+    return {"ok": True}
+
+
+@app.post("/api/accounts/{account_id}/reveal")
+async def reveal_secrets(
+    account_id: str,
+    req: RevealRequest,
+    principal: Principal = Depends(current_principal),
+    db: AsyncSession = Depends(get_db),
+):
+    """Decrypt secrets using the OWNER's password (proves user-side decryption)."""
+    acc = await _get_owned_account(db, principal, account_id)
+    if not vault.verify_password(req.password, principal.user.password_salt, principal.user.password_hash):
+        raise HTTPException(status_code=403, detail="Incorrect password")
+    user_key = vault.derive_key(req.password, principal.user.enc_salt)
     try:
-        return CodeResponse(
-            code=steam_guard.generate_code(req.shared_secret),
-            expires_in=steam_guard.seconds_remaining(),
-        )
-    except Exception as exc:  # noqa: BLE001 - surface a clean 400
-        raise HTTPException(status_code=400, detail=f"Invalid shared secret: {exc}") from exc
+        secrets = vault.decrypt_with_user(acc.secrets_blob, user_key)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="Could not decrypt with user key") from exc
+    # Never return the password back.
+    secrets.pop("password", None)
+    return {"secrets": secrets}
 
 
-@app.post("/api/confirmations/list")
-async def list_confirmations(session: SessionModel) -> dict:
+# ---------------- steam session ----------------
+@app.post("/api/accounts/{account_id}/steam-login")
+async def steam_login(
+    account_id: str,
+    req: SteamLoginRequest,
+    principal: Principal = Depends(current_principal),
+    db: AsyncSession = Depends(get_db),
+):
+    """Log in to Steam (password + shared_secret) to obtain a refresh token."""
+    user_key = principal.user_key
+    if user_key is None:
+        raise HTTPException(status_code=401, detail="Session locked — please sign in again")
+    acc = await _get_owned_account(db, principal, account_id)
+    secrets = _server_secrets(acc)
+    if req.password:
+        secrets["password"] = req.password
+    if not secrets.get("password"):
+        raise HTTPException(status_code=400, detail="Steam password required")
     try:
-        items = await conf.list_confirmations(session.to_session())
-        return {"confirmations": items}
-    except conf.SteamAuthError as exc:
-        raise HTTPException(status_code=401, detail=str(exc)) from exc
+        refresh = await steam.login_for_refresh_token(secrets, acc.steam_id, acc.proxy)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Steam login failed: {exc}") from exc
+
+    acc.secrets_blob = vault.reseal_secrets(
+        acc.secrets_blob, {"refresh_token": refresh, "password": req.password or secrets.get("password")}, user_key
+    )
+    acc.has_session = True
+    acc.status = "online"
+    acc.last_login = time.time()
+    await db.commit()
+    return _account_out(acc)
 
 
-@app.post("/api/confirmations/act")
-async def act(req: ActRequest) -> dict:
+# ---------------- confirmations ----------------
+@app.get("/api/accounts/{account_id}/confirmations")
+async def account_confirmations(
+    account_id: str,
+    principal: Principal = Depends(current_principal),
+    db: AsyncSession = Depends(get_db),
+):
+    acc = await _get_owned_account(db, principal, account_id)
+    secrets = _server_secrets(acc)
     try:
-        ok = await conf.act_on_confirmation(
-            req.session.to_session(), req.confirmation_id, req.nonce, req.action
-        )
-        return {"success": ok}
-    except conf.SteamAuthError as exc:
-        raise HTTPException(status_code=401, detail=str(exc)) from exc
-    except ValueError as exc:
+        items, new_refresh = await steam.list_confirmations(acc.id, secrets, acc.steam_id, acc.proxy)
+    except steam.SteamServiceError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Steam error: {exc}") from exc
+    await _persist_new_refresh(db, acc, new_refresh)
+    return {"confirmations": items}
+
+
+@app.get("/api/confirmations")
+async def all_confirmations(
+    principal: Principal = Depends(current_principal), db: AsyncSession = Depends(get_db)
+):
+    """Aggregate live confirmations across all of the user's session-ready accounts."""
+    res = await db.execute(
+        select(SteamAccount).where(
+            SteamAccount.user_id == principal.user.id, SteamAccount.has_session == True  # noqa: E712
+        )
+    )
+    out: list[dict] = []
+    errors: list[dict] = []
+    for acc in res.scalars().all():
+        secrets = _server_secrets(acc)
+        try:
+            items, new_refresh = await steam.list_confirmations(acc.id, secrets, acc.steam_id, acc.proxy)
+            out.extend(items)
+            await _persist_new_refresh(db, acc, new_refresh)
+        except Exception as exc:  # noqa: BLE001
+            errors.append({"accountId": acc.id, "error": str(exc)})
+    return {"confirmations": out, "errors": errors}
+
+
+@app.post("/api/accounts/{account_id}/confirmations/{confirmation_id}")
+async def act_confirmation(
+    account_id: str,
+    confirmation_id: str,
+    req: ActRequest,
+    principal: Principal = Depends(current_principal),
+    db: AsyncSession = Depends(get_db),
+):
+    acc = await _get_owned_account(db, principal, account_id)
+    secrets = _server_secrets(acc)
+    try:
+        ok, new_refresh = await steam.act_on_confirmation(
+            secrets, acc.steam_id, acc.proxy, confirmation_id, req.action
+        )
+    except steam.SteamServiceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Steam error: {exc}") from exc
+    acc.last_confirmation = time.time()
+    await _persist_new_refresh(db, acc, new_refresh)
+    await db.commit()
+    return {"success": ok}
+
+
+@app.post("/api/accounts/{account_id}/confirmations-accept-all")
+async def accept_all_confirmations(
+    account_id: str,
+    type_filter: str | None = None,
+    principal: Principal = Depends(current_principal),
+    db: AsyncSession = Depends(get_db),
+):
+    acc = await _get_owned_account(db, principal, account_id)
+    secrets = _server_secrets(acc)
+    try:
+        count, new_refresh = await steam.accept_all(secrets, acc.steam_id, acc.proxy, type_filter)
+    except steam.SteamServiceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Steam error: {exc}") from exc
+    acc.last_confirmation = time.time()
+    await _persist_new_refresh(db, acc, new_refresh)
+    await db.commit()
+    return {"accepted": count}
+
+
+# ---------------- QR login approval ----------------
+@app.post("/api/accounts/{account_id}/qr-approve")
+async def qr_approve(
+    account_id: str,
+    req: QrApproveRequest,
+    principal: Principal = Depends(current_principal),
+    db: AsyncSession = Depends(get_db),
+):
+    acc = await _get_owned_account(db, principal, account_id)
+    secrets = _server_secrets(acc)
+    try:
+        result = await steam.approve_qr_login(secrets, acc.steam_id, acc.proxy, req.challenge_url, req.confirm)
+    except steam.SteamServiceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Steam error: {exc}") from exc
+    await _persist_new_refresh(db, acc, result.pop("new_refresh", None))
+    return result
