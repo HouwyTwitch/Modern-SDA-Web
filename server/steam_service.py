@@ -15,6 +15,7 @@ import re
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime
+from types import SimpleNamespace
 from urllib.parse import unquote
 
 import httpx
@@ -48,11 +49,19 @@ async def fetch_avatar(steam_id: str, proxy: str | None = None) -> str | None:
     """Best-effort fetch of an account's public Steam avatar URL."""
     if not steam_id:
         return None
+    proxy = proxy if (proxy and proxy.startswith("http")) else None
     try:
-        async with httpx.AsyncClient(timeout=6, proxy=proxy or None) as c:
+        async with httpx.AsyncClient(
+            timeout=8,
+            follow_redirects=True,
+            proxy=proxy,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; ModernSDA/2)"},
+        ) as c:
             r = await c.get(f"https://steamcommunity.com/profiles/{steam_id}?xml=1")
         m = re.search(r"<avatarFull>\s*<!\[CDATA\[(.*?)\]\]>\s*</avatarFull>", r.text, re.DOTALL)
-        return m.group(1).strip() if m else None
+        if not m:
+            return None
+        return m.group(1).strip().replace("http://", "https://")
     except Exception:
         return None
 
@@ -118,8 +127,17 @@ def _to_epoch_ms(value) -> int:
     return int(time.time() * 1000)
 
 
+def _summary_text(value) -> str:
+    # aiosteampy's `summary` is a plain string; guard against list just in case.
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (list, tuple)):
+        return " · ".join(str(v) for v in value)
+    return ""
+
+
 def _to_dict(account_id: str, c: Confirmation) -> dict:
-    summary = " · ".join(c.summary) if getattr(c, "summary", None) else ""
+    summary = _summary_text(getattr(c, "summary", None))
     return {
         "id": str(c.id),
         "nonce": str(c.nonce),
@@ -127,6 +145,9 @@ def _to_dict(account_id: str, c: Confirmation) -> dict:
         "type": _TYPE_MAP.get(c.type, "other"),
         "title": c.headline or (c.type.name.title() if c.type else "Confirmation"),
         "subtitle": summary,
+        "warn": getattr(c, "warn", None),
+        "multi": bool(getattr(c, "multi", False)),
+        "creatorId": str(getattr(c, "creator_id", "") or ""),
         "amount": None,
         "createdAt": _to_epoch_ms(getattr(c, "creation_time", None)),
         "iconUrls": [c.icon] if getattr(c, "icon", None) else [],
@@ -152,19 +173,30 @@ async def list_confirmations(account_id: str, secrets: dict, steam_id: str, prox
 
 
 async def act_on_confirmation(
-    secrets: dict, steam_id: str, proxy: str | None, confirmation_id: str, action: str
+    secrets: dict,
+    steam_id: str,
+    proxy: str | None,
+    confirmation_id: str,
+    action: str,
+    nonce: str | None = None,
 ):
+    """Perform exactly one confirmation op: 'allow' approves, 'cancel' declines.
+
+    When the nonce is known we send the op directly (a single request) instead of
+    re-listing confirmations — so declining can only ever decline.
+    """
     if action not in ("allow", "cancel"):
         raise SteamServiceError("action must be 'allow' or 'cancel'")
     async with _session(secrets, steam_id, proxy) as (client, new_refresh):
-        confs = await client.get_confirmations()
-        target = next((c for c in confs if str(c.id) == str(confirmation_id)), None)
-        if not target:
-            raise SteamServiceError("Confirmation not found (already handled?)")
-        if action == "allow":
-            await client.allow_confirmation(target)
+        if nonce:
+            target = SimpleNamespace(id=int(confirmation_id), nonce=str(nonce))
         else:
-            await client.send_confirmation(target, "cancel")
+            confs = await client.get_confirmations(update_listings=False)
+            target = next((c for c in confs if str(c.id) == str(confirmation_id)), None)
+            if not target:
+                raise SteamServiceError("Confirmation not found (already handled?)")
+        # send_confirmation only reads .id and .nonce; tag is the op verbatim.
+        await client.send_confirmation(target, action)
         return True, new_refresh
 
 

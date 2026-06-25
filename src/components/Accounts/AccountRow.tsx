@@ -24,9 +24,12 @@ export function AccountRow({ account, remaining, onOpen }: Props) {
   }
 
   return (
-    <button
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onOpen}
-      className="card hover-lift group flex w-full items-center gap-3 p-3 text-left hover:border-accent/50 sm:gap-4 sm:p-4"
+      onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onOpen()}
+      className="card hover-lift group flex w-full cursor-pointer items-center gap-3 p-3 text-left hover:border-accent/50 sm:gap-4 sm:p-4"
     >
       <Avatar name={account.name} color={account.avatarColor} url={account.avatarUrl} size={48} />
 
@@ -58,6 +61,6 @@ export function AccountRow({ account, remaining, onOpen }: Props) {
         </span>
         <MoreHorizontal size={18} className="text-ink-faint" />
       </div>
-    </button>
+    </div>
   );
 }

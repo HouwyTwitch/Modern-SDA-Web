@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Camera, Check, X, Loader2, ImageUp } from "lucide-react";
+import { Camera, Check, X, Loader2, ClipboardPaste } from "lucide-react";
 import { Modal } from "../common/Modal";
 import { useStore } from "../../store/useStore";
 import type { Account } from "../../types";
@@ -22,19 +22,19 @@ export function QrApproveModal({ account, open, onClose }: Props) {
   const [scanning, setScanning] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const imageRef = useRef<HTMLInputElement>(null);
 
   const detectorSupported = typeof window !== "undefined" && "BarcodeDetector" in window;
 
-  async function decodeImage(file?: File) {
-    if (!file) return;
+  /** Decode a QR code from an image blob (clipboard paste). */
+  async function decodeImage(blob?: Blob | null) {
+    if (!blob) return;
     if (!detectorSupported) {
       setError("Reading QR from images needs a Chromium-based browser.");
       return;
     }
     setError(undefined);
     try {
-      const bitmap = await createImageBitmap(file);
+      const bitmap = await createImageBitmap(blob);
       // @ts-expect-error BarcodeDetector is not yet in TS DOM lib
       const detector: BD = new window.BarcodeDetector({ formats: ["qr_code"] });
       const codes = await detector.detect(bitmap);
@@ -43,10 +43,33 @@ export function QrApproveModal({ account, open, onClose }: Props) {
         setUrl(codes[0].rawValue);
         pushToast("QR loaded from image", "success");
       } else {
-        setError("No QR code found in that image.");
+        setError("No QR code found in the image.");
       }
     } catch {
-      setError("Could not read that image.");
+      setError("Could not read the image.");
+    }
+  }
+
+  /** Read an image (or a link) directly from the clipboard. */
+  async function pasteFromClipboard() {
+    setError(undefined);
+    try {
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        const imgType = item.types.find((t) => t.startsWith("image/"));
+        if (imgType) {
+          await decodeImage(await item.getType(imgType));
+          return;
+        }
+      }
+      const text = await navigator.clipboard.readText();
+      if (text.trim()) {
+        setUrl(text.trim());
+        return;
+      }
+      setError("No image or link found in the clipboard.");
+    } catch {
+      setError("Clipboard blocked — paste into the field with Ctrl/Cmd+V instead.");
     }
   }
 
@@ -116,8 +139,8 @@ export function QrApproveModal({ account, open, onClose }: Props) {
   return (
     <Modal open={open} onClose={onClose} title="Approve QR login">
       <p className="mb-4 text-sm text-ink-muted">
-        Scan or paste the Steam QR challenge shown on the device you're signing in on. This account's
-        authenticator will approve the login.
+        Paste the Steam QR challenge — a screenshot/copied image of the QR, or the link itself —
+        shown on the device you're signing in on.
       </p>
 
       {scanning ? (
@@ -127,28 +150,22 @@ export function QrApproveModal({ account, open, onClose }: Props) {
       ) : (
         <textarea
           className="input min-h-[88px] resize-none font-mono text-xs"
-          placeholder="steammobile://… or https://s.team/q/…  (paste, scan, or load an image)"
+          placeholder="Paste a QR image (Ctrl/Cmd+V) or the challenge link here…"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
-          onDrop={(e) => {
-            e.preventDefault();
-            void decodeImage(e.dataTransfer.files?.[0]);
+          onPaste={(e) => {
+            const img = Array.from(e.clipboardData.items).find((i) => i.type.startsWith("image/"));
+            if (img) {
+              e.preventDefault();
+              void decodeImage(img.getAsFile());
+            }
           }}
-          onDragOver={(e) => e.preventDefault()}
         />
       )}
 
-      <input
-        ref={imageRef}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={(e) => void decodeImage(e.target.files?.[0])}
-      />
-
       <div className="mt-2 flex flex-wrap items-center gap-3">
-        <button onClick={() => imageRef.current?.click()} className="btn-ghost !px-2 text-xs text-accent">
-          <ImageUp size={14} /> Load from image
+        <button onClick={pasteFromClipboard} className="btn-ghost !px-2 text-xs text-accent">
+          <ClipboardPaste size={14} /> Paste image from clipboard
         </button>
         {detectorSupported && (
           <button onClick={scanning ? stopScan : startScan} className="btn-ghost !px-2 text-xs text-accent">

@@ -74,6 +74,7 @@ export const api = {
   // ---- accounts ----
   listAccounts: () => request<Account[]>("GET", "/accounts"),
   listCodes: () => request<{ id: string; code: string; codeExpiresIn: number }[]>("GET", "/accounts/codes"),
+  refreshProfiles: () => request<Account[]>("POST", "/accounts/refresh-profiles"),
   addAccount: (payload: Record<string, unknown>) => request<Account>("POST", "/accounts", payload),
   updateAccount: (id: string, patch: Record<string, unknown>) =>
     request<Account>("PATCH", `/accounts/${id}`, patch),
@@ -93,11 +94,16 @@ export const api = {
       "GET",
       "/confirmations",
     ),
-  actConfirmation: (accountId: string, confirmationId: string, action: "allow" | "cancel") =>
+  actConfirmation: (
+    accountId: string,
+    confirmationId: string,
+    action: "allow" | "cancel",
+    nonce?: string,
+  ) =>
     request<{ success: boolean }>(
       "POST",
       `/accounts/${accountId}/confirmations/${confirmationId}`,
-      { action },
+      { action, nonce },
     ),
   acceptAll: (accountId: string, type?: string) =>
     request<{ accepted: number }>(

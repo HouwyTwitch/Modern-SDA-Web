@@ -29,7 +29,7 @@ interface StoreState {
   reveal: (id: string, password: string) => Promise<Record<string, string>>;
 
   loadConfirmations: () => Promise<void>;
-  actConfirmation: (accountId: string, id: string, action: "allow" | "cancel") => Promise<void>;
+  actConfirmation: (accountId: string, id: string, action: "allow" | "cancel", nonce?: string) => Promise<void>;
   acceptAll: (accountId: string, type?: string) => Promise<void>;
 
   pushToast: (message: string, kind?: Toast["kind"]) => void;
@@ -51,6 +51,18 @@ export const useStore = create<StoreState>((set, get) => ({
     try {
       const accounts = await api.listAccounts();
       set({ accounts, codesFetchedAt: Date.now() });
+      // Best-effort: backfill any missing Steam avatars without blocking render.
+      api
+        .refreshProfiles()
+        .then((updated) => {
+          const urls = new Map(updated.map((a) => [a.id, a.avatarUrl]));
+          set((s) => ({
+            accounts: s.accounts.map((a) =>
+              urls.get(a.id) ? { ...a, avatarUrl: urls.get(a.id) ?? a.avatarUrl } : a,
+            ),
+          }));
+        })
+        .catch(() => {});
     } catch (e) {
       get().pushToast((e as Error).message, "error");
     } finally {
@@ -137,12 +149,16 @@ export const useStore = create<StoreState>((set, get) => ({
     }
   },
 
-  actConfirmation: async (accountId, id, action) => {
+  actConfirmation: async (accountId, id, action, nonce) => {
     // Optimistic removal.
     const prev = get().confirmations;
     set({ confirmations: prev.filter((c) => c.id !== id) });
     try {
-      await api.actConfirmation(accountId, id, action);
+      await api.actConfirmation(accountId, id, action, nonce);
+      // Reflect the activity timestamp immediately.
+      set((s) => ({
+        accounts: s.accounts.map((a) => (a.id === accountId ? { ...a, lastConfirmation: Date.now() } : a)),
+      }));
       get().pushToast(action === "allow" ? "Approved" : "Declined", action === "allow" ? "success" : "info");
     } catch (e) {
       set({ confirmations: prev });
@@ -159,6 +175,9 @@ export const useStore = create<StoreState>((set, get) => ({
     });
     try {
       const res = await api.acceptAll(accountId, type);
+      set((s) => ({
+        accounts: s.accounts.map((a) => (a.id === accountId ? { ...a, lastConfirmation: Date.now() } : a)),
+      }));
       get().pushToast(`Approved ${res.accepted} confirmation${res.accepted !== 1 ? "s" : ""}`, "success");
     } catch (e) {
       set({ confirmations: prev });

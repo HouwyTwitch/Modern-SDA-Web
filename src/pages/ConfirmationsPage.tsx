@@ -3,6 +3,7 @@ import { Check, X, CheckCheck, Inbox, ArrowLeftRight, Store, RefreshCw, AlertTri
 import { useStore } from "../store/useStore";
 import type { Confirmation, ConfirmationType } from "../types";
 import { Avatar } from "../components/common/Avatar";
+import { ConfirmationDetailModal } from "../components/Confirmations/ConfirmationDetailModal";
 import { timeAgo } from "../lib/format";
 
 type Tab = "all" | "trade" | "market";
@@ -22,6 +23,7 @@ export function ConfirmationsPage() {
   const act = useStore((s) => s.actConfirmation);
   const acceptAll = useStore((s) => s.acceptAll);
   const [tab, setTab] = useState<Tab>("all");
+  const [selected, setSelected] = useState<Confirmation | null>(null);
 
   useEffect(() => {
     void loadConfirmations();
@@ -110,7 +112,7 @@ export function ConfirmationsPage() {
                 </div>
                 <div className="space-y-2.5">
                   {items.map((c) => (
-                    <ConfirmationCard key={c.id} conf={c} onResolve={act} />
+                    <ConfirmationCard key={c.id} conf={c} onResolve={act} onOpen={() => setSelected(c)} />
                   ))}
                 </div>
               </section>
@@ -118,6 +120,14 @@ export function ConfirmationsPage() {
           })}
         </div>
       )}
+
+      <ConfirmationDetailModal
+        conf={selected}
+        account={accounts.find((a) => a.id === selected?.accountId)}
+        open={selected !== null}
+        onClose={() => setSelected(null)}
+        onResolve={act}
+      />
     </div>
   );
 }
@@ -143,13 +153,18 @@ function EmptyState({ loading, sessionCount }: { loading: boolean; sessionCount:
 function ConfirmationCard({
   conf,
   onResolve,
+  onOpen,
 }: {
   conf: Confirmation;
-  onResolve: (accountId: string, id: string, action: "allow" | "cancel") => void;
+  onResolve: (accountId: string, id: string, action: "allow" | "cancel", nonce?: string) => void;
+  onOpen: () => void;
 }) {
   const Icon = TYPE_ICON[conf.type];
   return (
-    <div className="card hover-lift flex items-center gap-3 p-3 sm:p-4">
+    <div
+      onClick={onOpen}
+      className="card hover-lift flex cursor-pointer items-center gap-3 p-3 sm:p-4"
+    >
       <div
         className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ${
           conf.type === "trade" ? "bg-accent-soft text-accent" : "bg-purple-500/10 text-purple-400"
@@ -168,16 +183,16 @@ function ConfirmationCard({
           <span className="shrink-0">{timeAgo(conf.createdAt)}</span>
         </div>
       </div>
-      <div className="flex shrink-0 gap-2">
+      <div className="flex shrink-0 gap-2" onClick={(e) => e.stopPropagation()}>
         <button
-          onClick={() => onResolve(conf.accountId, conf.id, "allow")}
+          onClick={() => onResolve(conf.accountId, conf.id, "allow", conf.nonce)}
           className="grid h-9 w-9 place-items-center rounded-xl bg-green-500/10 text-green-400 transition hover:bg-green-500 hover:text-white active:scale-90"
           aria-label="Approve"
         >
           <Check size={18} />
         </button>
         <button
-          onClick={() => onResolve(conf.accountId, conf.id, "cancel")}
+          onClick={() => onResolve(conf.accountId, conf.id, "cancel", conf.nonce)}
           className="grid h-9 w-9 place-items-center rounded-xl bg-red-500/10 text-red-400 transition hover:bg-red-500 hover:text-white active:scale-90"
           aria-label="Decline"
         >

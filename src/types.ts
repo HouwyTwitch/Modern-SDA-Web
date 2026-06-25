@@ -33,6 +33,9 @@ export interface Confirmation {
   createdAt: number;
   nonce?: string;
   iconUrls?: string[];
+  warn?: string | null;
+  multi?: boolean;
+  creatorId?: string;
 }
 
 export interface AuthUser {

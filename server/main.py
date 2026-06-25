@@ -9,6 +9,7 @@ Run:  uvicorn main:app --reload --port 8000
 """
 from __future__ import annotations
 
+import asyncio
 import time
 from contextlib import asynccontextmanager
 
@@ -98,9 +99,9 @@ def _account_out(a: SteamAccount) -> dict:
         "favorite": a.favorite,
         "hasIdentity": a.has_identity,
         "hasSession": a.has_session,
-        "lastConfirmation": a.last_confirmation,
-        "lastLogin": a.last_login,
-        "createdAt": a.created_at,
+        "lastConfirmation": a.last_confirmation * 1000 if a.last_confirmation else None,
+        "lastLogin": a.last_login * 1000 if a.last_login else None,
+        "createdAt": a.created_at * 1000 if a.created_at else None,
     }
 
 
@@ -217,6 +218,25 @@ async def list_codes(
         code = steam_guard.generate_code(secrets["shared_secret"]) if secrets.get("shared_secret") else "•••••"
         out.append({"id": a.id, "code": code, "codeExpiresIn": rem})
     return out
+
+
+@app.post("/api/accounts/refresh-profiles", response_model=list[AccountOut])
+async def refresh_profiles(
+    principal: Principal = Depends(current_principal), db: AsyncSession = Depends(get_db)
+):
+    """Backfill missing Steam avatars for the user's accounts (best-effort)."""
+    res = await db.execute(select(SteamAccount).where(SteamAccount.user_id == principal.user.id))
+    accounts = list(res.scalars().all())
+    pending = [a for a in accounts if not a.avatar_url and a.steam_id]
+    if pending:
+        fetched = await asyncio.gather(
+            *[steam.fetch_avatar(a.steam_id, a.proxy) for a in pending], return_exceptions=True
+        )
+        for acc, url in zip(pending, fetched):
+            if isinstance(url, str) and url:
+                acc.avatar_url = url
+        await db.commit()
+    return [_account_out(a) for a in accounts]
 
 
 @app.post("/api/accounts", response_model=AccountOut)
@@ -406,7 +426,7 @@ async def act_confirmation(
     secrets = _server_secrets(acc)
     try:
         ok, new_refresh = await steam.act_on_confirmation(
-            secrets, acc.steam_id, acc.proxy, confirmation_id, req.action
+            secrets, acc.steam_id, acc.proxy, confirmation_id, req.action, req.nonce
         )
     except steam.SteamServiceError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

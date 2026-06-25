@@ -33,7 +33,7 @@ class AccountOut(BaseModel):
     hasSession: bool
     lastConfirmation: float | None
     lastLogin: float | None
-    createdAt: float
+    createdAt: float | None
 
 
 class AccountWithCode(AccountOut):
@@ -81,3 +81,4 @@ class QrApproveRequest(BaseModel):
 
 class ActRequest(BaseModel):
     action: str  # "allow" | "cancel"
+    nonce: str | None = None  # confirmation key; lets us act without re-listing
