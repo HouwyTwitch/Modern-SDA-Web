@@ -1,0 +1,110 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Accent (default: Steam blue). Overridden at runtime by the theme store. */
+  --accent: 26 159 255;
+}
+
+/* ---- Dark theme (default) ---- */
+html.dark {
+  --surface: 17 23 33; /* page background */
+  --surface-raised: 24 31 43; /* cards */
+  --surface-sunken: 13 18 26; /* inputs / wells */
+  --ink: 237 242 249;
+  --ink-muted: 148 161 178;
+  --ink-faint: 99 112 130;
+  --line: 38 47 61;
+}
+
+/* ---- Light theme ---- */
+html.light {
+  --surface: 244 246 250;
+  --surface-raised: 255 255 255;
+  --surface-sunken: 237 240 245;
+  --ink: 22 28 38;
+  --ink-muted: 91 103 120;
+  --ink-faint: 140 151 167;
+  --line: 224 228 235;
+}
+
+/* ---- High contrast theme ---- */
+html.contrast {
+  --surface: 0 0 0;
+  --surface-raised: 10 10 10;
+  --surface-sunken: 0 0 0;
+  --ink: 255 255 255;
+  --ink-muted: 210 210 210;
+  --ink-faint: 170 170 170;
+  --line: 90 90 90;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-surface text-ink font-sans antialiased;
+  margin: 0;
+  overscroll-behavior-y: none;
+}
+
+/* Respect users who prefer reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* Slim, themed scrollbars for a smooth modern feel. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--line)) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgb(var(--line));
+  border-radius: 9999px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@layer components {
+  .card {
+    @apply rounded-2xl border border-line bg-surface-raised;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold
+      transition-all duration-150 active:scale-[0.97] disabled:pointer-events-none disabled:opacity-50;
+  }
+  .btn-accent {
+    @apply btn bg-accent text-white shadow-lg shadow-accent/20 hover:brightness-110;
+  }
+  .btn-ghost {
+    @apply btn text-ink-muted hover:bg-surface-sunken hover:text-ink;
+  }
+  .btn-danger {
+    @apply btn bg-red-500/10 text-red-400 hover:bg-red-500/20;
+  }
+  .input {
+    @apply w-full rounded-xl border border-line bg-surface-sunken px-4 py-2.5 text-sm text-ink
+      placeholder:text-ink-faint outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/30;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold transition;
+  }
+}
