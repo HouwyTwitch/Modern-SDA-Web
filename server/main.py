@@ -19,7 +19,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import steam_guard
 import steam_service as steam
+import server_crypto
 import vault
+from crypto_mw import EncryptedChannelMiddleware
 from auth import (
     Principal,
     cache_user_key,
@@ -55,13 +57,22 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="Modern SDA Web API", version="2.0.0", lifespan=lifespan)
+app = FastAPI(title="Modern SDA Web API", version="2.1.0", lifespan=lifespan)
+# Order matters: CORS is added last so it is the outermost middleware.
+app.add_middleware(EncryptedChannelMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["x-enc"],
 )
+
+
+@app.get("/api/crypto/pubkey")
+async def crypto_pubkey():
+    """Server RSA public key (PEM) used to bootstrap the encrypted channel."""
+    return {"pubkey": server_crypto.public_key_pem()}
 
 
 # ---------------- helpers ----------------

@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { api, getToken, setToken } from "../lib/api";
+import { hashPassword } from "../lib/passwordHash";
 import type { AuthUser } from "../types";
 
 type AuthStatus = "loading" | "authed" | "guest";
@@ -32,13 +33,13 @@ export const useAuth = create<AuthState>((set) => ({
   },
 
   login: async (email, password) => {
-    const res = await api.login(email, password);
+    const res = await api.login(email, await hashPassword(email, password));
     setToken(res.token);
     set({ user: { email: res.email, user_id: res.user_id }, status: "authed" });
   },
 
   register: async (email, password) => {
-    const res = await api.register(email, password);
+    const res = await api.register(email, await hashPassword(email, password));
     setToken(res.token);
     set({ user: { email: res.email, user_id: res.user_id }, status: "authed" });
   },

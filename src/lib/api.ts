@@ -1,5 +1,7 @@
 // Authenticated client for the Modern SDA Web backend.
+// All requests go through an RSA-wrapped AES-GCM encrypted channel (secureChannel).
 import type { Account, AuthUser, Confirmation } from "../types";
+import { openResponse, sealRequest } from "./secureChannel";
 
 const TOKEN_KEY = "msda.token";
 
@@ -23,21 +25,31 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   const headers: Record<string, string> = {};
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
-  if (body !== undefined) headers["Content-Type"] = "application/json";
 
-  const res = await fetch(`/api${path}`, {
-    method,
-    headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+  const sealed = await sealRequest(body !== undefined ? JSON.stringify(body) : undefined);
+  headers["X-Session-Key"] = sealed.sessionKeyHeader;
+  if (sealed.encrypted) {
+    headers["X-Enc"] = "1";
+    headers["Content-Type"] = "application/json";
+  }
+
+  const res = await fetch(`/api${path}`, { method, headers, body: sealed.body });
 
   if (res.status === 204) return undefined as T;
-  const data = await res.json().catch(() => ({}));
+
+  let data: { detail?: string; message?: string } & Record<string, unknown> = {};
+  const text = await res.text();
+  if (text) {
+    const parsed = JSON.parse(text);
+    if (res.headers.get("x-enc") === "1") {
+      data = JSON.parse(await openResponse(sealed.aesKey, parsed as { iv: string; ct: string }));
+    } else {
+      data = parsed;
+    }
+  }
+
   if (!res.ok) {
-    throw new ApiError(
-      (data && (data.detail || data.message)) || `Request failed (${res.status})`,
-      res.status,
-    );
+    throw new ApiError((data.detail || data.message) || `Request failed (${res.status})`, res.status);
   }
   return data as T;
 }

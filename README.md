@@ -76,26 +76,34 @@ npm run dev          # http://localhost:5173
 Register an account, import a `.maFile` (or add manually), then **Sign in to
 Steam** on an account to enable live confirmations and QR approval.
 
-## Encryption
+## Security
 
-Per Steam account:
+Defence in depth, in layers:
 
-1. A random 256-bit **data key (DEK)** encrypts each secret with AES-256-GCM.
-2. The DEK is **wrapped twice** — once with a key derived from your password
-   (scrypt), once with the server master key.
+1. **Passwords never leave the browser in the clear.** The client derives a hash
+   from `(password, email)` with PBKDF2-SHA256 and sends only that hash; the
+   server never sees the plaintext password.
+2. **Encrypted application channel.** On top of TLS, every API request/response
+   body is encrypted: the client generates a fresh AES-256-GCM session key,
+   RSA-OAEP-wraps it under the server's public key (`/api/crypto/pubkey`), and
+   encrypts the body. The server decrypts and encrypts the response with the
+   same per-request key. Passwords, secrets, and codes are confidential even if
+   TLS is stripped.
+3. **Envelope-encrypted vault at rest.** Per Steam account, a random 256-bit
+   **data key (DEK)** encrypts each secret with AES-256-GCM. The DEK is
+   **wrapped twice** — once with your password-derived key (scrypt), once with
+   the server master key. Either wrap recovers the DEK, so the **server** can
+   run live confirmations / generate codes, and **you** can decrypt with your
+   password (“Reveal secrets”), while a leaked database alone reveals nothing.
 
-Either wrap recovers the DEK, so:
-
-- the **server** can decrypt to run live confirmations / generate codes, and
-- **you** can decrypt with your password (e.g. the “Reveal secrets” action),
-
-while a leaked database alone reveals nothing. Codes are generated server-side
-and your secrets are never sent to the browser unless you explicitly reveal them.
+Codes are generated server-side; your secrets are never sent to the browser
+unless you explicitly reveal them.
 
 ## API overview
 
 | Method | Path                                                  | Purpose                       |
 | ------ | ----------------------------------------------------- | ----------------------------- |
+| GET    | `/api/crypto/pubkey`                                  | RSA public key (channel boot) |
 | POST   | `/api/auth/register` · `/api/auth/login`              | Account auth (returns JWT)    |
 | GET    | `/api/accounts` · `/api/accounts/codes`               | List accounts + live codes    |
 | POST   | `/api/accounts`                                       | Add a Steam account           |

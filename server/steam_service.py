@@ -14,6 +14,7 @@ import json
 import re
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime
 from urllib.parse import unquote
 
 import httpx
@@ -108,9 +109,17 @@ async def _session(secrets: dict, steam_id: str, proxy: str | None):
         await client.session.close()
 
 
+def _to_epoch_ms(value) -> int:
+    """Normalise aiosteampy's creation_time (datetime | int | None) to epoch ms."""
+    if isinstance(value, datetime):
+        return int(value.timestamp() * 1000)
+    if isinstance(value, (int, float)):
+        return int(value * 1000)
+    return int(time.time() * 1000)
+
+
 def _to_dict(account_id: str, c: Confirmation) -> dict:
     summary = " · ".join(c.summary) if getattr(c, "summary", None) else ""
-    created = int(getattr(c, "creation_time", time.time()))
     return {
         "id": str(c.id),
         "nonce": str(c.nonce),
@@ -119,7 +128,7 @@ def _to_dict(account_id: str, c: Confirmation) -> dict:
         "title": c.headline or (c.type.name.title() if c.type else "Confirmation"),
         "subtitle": summary,
         "amount": None,
-        "createdAt": created * 1000,
+        "createdAt": _to_epoch_ms(getattr(c, "creation_time", None)),
         "iconUrls": [c.icon] if getattr(c, "icon", None) else [],
     }
 

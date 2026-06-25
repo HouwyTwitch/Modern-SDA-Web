@@ -36,6 +36,7 @@ server/__pycache__/
 server/*.db
 server/.dev_master.key
 server/.dev_jwt.key
+server/.dev_rsa_private.pem
 
 # Misc
 _shot.mjs

@@ -2,6 +2,8 @@ import { useState } from "react";
 import { Eye, Copy, Check, Loader2, Lock } from "lucide-react";
 import { Modal } from "../common/Modal";
 import { useStore } from "../../store/useStore";
+import { useAuth } from "../../store/useAuth";
+import { hashPassword } from "../../lib/passwordHash";
 import type { Account } from "../../types";
 
 interface Props {
@@ -20,6 +22,7 @@ const LABELS: Record<string, string> = {
 /** Decrypt secrets with the user's own password (proves owner-side decryption). */
 export function RevealModal({ account, open, onClose }: Props) {
   const reveal = useStore((s) => s.reveal);
+  const userEmail = useAuth((s) => s.user?.email ?? "");
   const [password, setPassword] = useState("");
   const [secrets, setSecrets] = useState<Record<string, string> | null>(null);
   const [busy, setBusy] = useState(false);
@@ -37,7 +40,7 @@ export function RevealModal({ account, open, onClose }: Props) {
     setError(undefined);
     setBusy(true);
     try {
-      const s = await reveal(account.id, password);
+      const s = await reveal(account.id, await hashPassword(userEmail, password));
       setSecrets(s);
     } catch (e) {
       setError((e as Error).message);
