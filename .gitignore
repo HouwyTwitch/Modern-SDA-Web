@@ -32,6 +32,8 @@ server/__pycache__/
 *.pyc
 .env
 .env.*
+!.env.example
+!server/.env.example
 # Local DB + dev secrets (never commit)
 server/*.db
 server/.dev_master.key

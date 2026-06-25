@@ -8,9 +8,10 @@ interface Props {
   size?: number;
 }
 
+/** Account avatar: shows the Steam profile image, falling back to initials. */
 export function Avatar({ name, color, url, size = 44 }: Props) {
   const [failed, setFailed] = useState(false);
-  // Reset the error state when the URL changes (e.g. avatars backfilled async).
+  // Reset the error state when the URL changes (avatars are backfilled async).
   useEffect(() => setFailed(false), [url]);
 
   if (url && !failed) {
@@ -20,6 +21,7 @@ export function Avatar({ name, color, url, size = 44 }: Props) {
         alt={name}
         width={size}
         height={size}
+        referrerPolicy="no-referrer"
         onError={() => setFailed(true)}
         className="shrink-0 rounded-xl object-cover"
         style={{ width: size, height: size }}

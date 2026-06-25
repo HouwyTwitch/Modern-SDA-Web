@@ -53,7 +53,9 @@ async def fetch_avatar(steam_id: str, proxy: str | None = None) -> str | None:
     (falling back to <avatarMedium>), parsed with ElementTree so CDATA and
     whitespace are handled correctly.
     """
-    if not steam_id:
+    # steamid64 is always numeric — reject anything else so it can't manipulate
+    # the request URL.
+    if not steam_id or not steam_id.isdigit():
         return None
     proxy = proxy if (proxy and proxy.startswith("http")) else None
     try:
@@ -287,4 +289,12 @@ async def approve_qr_login(
 
     if status_code >= 400:
         raise SteamServiceError(f"Steam returned HTTP {status_code}")
+    # Surface a Steam-reported failure if the response says so.
+    try:
+        body = json.loads(text)
+        inner = body.get("response", body) if isinstance(body, dict) else {}
+        if isinstance(inner, dict) and inner.get("success") is False:
+            raise SteamServiceError(inner.get("message") or "Steam rejected the QR approval")
+    except (ValueError, AttributeError):
+        pass
     return {"success": True, "confirmed": confirm, "client_id": client_id, "new_refresh": new_refresh}

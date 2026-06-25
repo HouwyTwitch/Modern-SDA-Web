@@ -12,6 +12,7 @@ import json
 import server_crypto
 
 _SKIP = {"/api/crypto/pubkey", "/api/health"}
+MAX_BODY = 4 * 1024 * 1024  # 4 MB cap on encrypted request bodies
 
 
 async def _send_json(send, status: int, obj: dict) -> None:
@@ -54,6 +55,8 @@ class EncryptedChannelMiddleware:
             while more:
                 msg = await receive()
                 body += msg.get("body", b"")
+                if len(body) > MAX_BODY:
+                    return await _send_json(send, 413, {"detail": "Request too large"})
                 more = msg.get("more_body", False)
             try:
                 plaintext = server_crypto.aes_decrypt(session_key, json.loads(body))

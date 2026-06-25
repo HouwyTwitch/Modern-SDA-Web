@@ -99,6 +99,13 @@ Defence in depth, in layers:
 Codes are generated server-side; your secrets are never sent to the browser
 unless you explicitly reveal them.
 
+**Additional hardening:** per-account ownership checks on every endpoint (no
+IDOR), constant-time password comparison, JWT pinned to HS256, brute-force rate
+limiting on auth, numeric-SteamID / http(s)-proxy input validation (no SSRF via
+the avatar fetch), and React's default output escaping (no `innerHTML`/`eval`).
+Set `SERVER_MASTER_KEY` and `JWT_SECRET` in production (see
+`server/.env.example`).
+
 ## API overview
 
 | Method | Path                                                  | Purpose                       |

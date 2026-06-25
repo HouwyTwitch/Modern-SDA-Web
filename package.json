@@ -1,7 +1,7 @@
 {
   "name": "modern-sda-web",
   "private": true,
-  "version": "1.0.0",
+  "version": "2.1.0",
   "type": "module",
   "description": "A modern web-based Steam Desktop Authenticator. Generate Steam Guard codes and manage confirmations from the browser.",
   "scripts": {

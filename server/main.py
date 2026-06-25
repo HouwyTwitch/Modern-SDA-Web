@@ -13,7 +13,7 @@ import asyncio
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,6 +34,7 @@ from auth import (
 from config import get_settings
 from db import get_db, init_db
 from models import SteamAccount, User
+from ratelimit import client_ip, rate_limit
 from schemas import (
     AccountOut,
     AccountWithCode,
@@ -142,12 +143,13 @@ async def _persist_new_refresh(db: AsyncSession, acc: SteamAccount, new_refresh:
 # ---------------- health ----------------
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "service": "modern-sda-web", "version": "2.0.0"}
+    return {"status": "ok", "service": "modern-sda-web", "version": app.version}
 
 
 # ---------------- auth ----------------
 @app.post("/api/auth/register", response_model=AuthResponse)
-async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
+async def register(req: RegisterRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    rate_limit(f"register:{client_ip(request)}", limit=10, window=3600)
     email = req.email.strip().lower()
     if await get_user_by_email(db, email):
         raise HTTPException(status_code=409, detail="Email already registered")
@@ -167,7 +169,8 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
 
 
 @app.post("/api/auth/login", response_model=AuthResponse)
-async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
+async def login(req: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    rate_limit(f"login:{client_ip(request)}", limit=15, window=900)
     user = await get_user_by_email(db, req.email.strip().lower())
     if not user or not vault.verify_password(req.password, user.password_salt, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid email or password")
@@ -250,8 +253,13 @@ async def add_account(
         raise HTTPException(status_code=401, detail="Session locked — please sign in again")
     if not steam_guard.is_valid_secret(req.shared_secret):
         raise HTTPException(status_code=400, detail="Invalid shared_secret")
+    steam_id_in = req.steamId.strip()
+    if steam_id_in and not steam_id_in.isdigit():
+        raise HTTPException(status_code=400, detail="SteamID must be numeric")
+    if req.proxy and not req.proxy.strip().startswith(("http://", "https://", "socks")):
+        raise HTTPException(status_code=400, detail="Proxy must be an http(s)/socks URL")
 
-    name = (req.name or req.account_name or (f"Account {req.steamId[-4:]}" if req.steamId else "New Account")).strip()
+    name = (req.name or req.account_name or (f"Account {steam_id_in[-4:]}" if steam_id_in else "New Account")).strip()
     fields = {
         "shared_secret": req.shared_secret.strip(),
         "identity_secret": (req.identity_secret or "").strip() or None,
@@ -259,7 +267,7 @@ async def add_account(
         "password": req.password or None,
         "refresh_token": req.refresh_token or None,
     }
-    steam_id = (steam.steamid_from_jwt(req.refresh_token) or req.steamId).strip()
+    steam_id = (steam.steamid_from_jwt(req.refresh_token) or steam_id_in).strip()
     acc = SteamAccount(
         user_id=principal.user.id,
         name=name,
@@ -288,7 +296,10 @@ async def update_account(
     if req.name is not None:
         acc.name = req.name.strip() or acc.name
     if req.proxy is not None:
-        acc.proxy = req.proxy or None
+        proxy = req.proxy.strip()
+        if proxy and not proxy.startswith(("http://", "https://", "socks")):
+            raise HTTPException(status_code=400, detail="Proxy must be an http(s)/socks URL")
+        acc.proxy = proxy or None
     if req.favorite is not None:
         acc.favorite = req.favorite
     await db.commit()
