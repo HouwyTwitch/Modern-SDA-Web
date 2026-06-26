@@ -125,19 +125,27 @@ def _sync_steam_id(acc: SteamAccount, secrets: dict) -> None:
         acc.steam_id = resolved
 
 
-async def _persist_new_refresh(db: AsyncSession, acc: SteamAccount, new_refresh: str | None):
-    """If a Steam operation produced a fresh refresh token, re-seal it."""
+def _apply_new_refresh(acc: SteamAccount, new_refresh: str | None) -> None:
+    """Re-seal a fresh refresh token into the account blob (no commit).
+
+    Reuses the existing data key (we don't have the user key here), so only the
+    refresh-token field is re-encrypted.
+    """
     if not new_refresh:
         return
-    # Re-seal using server key only path: we need a user_key to rewrap. Reuse the
-    # existing user-wrapped DEK by re-encrypting with server key derivation is not
-    # possible without user_key, so we keep the existing blob's DEK.
     blob = vault.json.loads(acc.secrets_blob)
     dek = vault._open(get_settings().server_master_key, blob["dek_srv"])
     blob["fields"]["refresh_token"] = vault._seal(dek, new_refresh.encode("utf-8"))
     acc.secrets_blob = vault.json.dumps(blob, separators=(",", ":"))
     acc.has_session = True
     acc.last_login = time.time()
+
+
+async def _persist_new_refresh(db: AsyncSession, acc: SteamAccount, new_refresh: str | None):
+    """If a Steam operation produced a fresh refresh token, re-seal it and commit."""
+    if not new_refresh:
+        return
+    _apply_new_refresh(acc, new_refresh)
     await db.commit()
 
 
@@ -401,27 +409,55 @@ async def account_confirmations(
     return {"confirmations": items}
 
 
+# Max number of accounts queried against Steam at once. Keeps things fast for
+# many accounts without hammering Steam (or exhausting sockets) all at once.
+_CONFIRMATIONS_CONCURRENCY = 8
+
+
 @app.get("/api/confirmations")
 async def all_confirmations(
     principal: Principal = Depends(current_principal), db: AsyncSession = Depends(get_db)
 ):
-    """Aggregate live confirmations across all of the user's session-ready accounts."""
+    """Aggregate live confirmations across all of the user's session-ready accounts.
+
+    Accounts are queried concurrently (bounded) so total time is roughly the
+    slowest account, not the sum of all of them. Network I/O runs in parallel;
+    database writes are applied afterwards on the single session.
+    """
     res = await db.execute(
         select(SteamAccount).where(
             SteamAccount.user_id == principal.user.id, SteamAccount.has_session == True  # noqa: E712
         )
     )
-    out: list[dict] = []
-    errors: list[dict] = []
-    for acc in res.scalars().all():
+    accounts = list(res.scalars().all())
+
+    # Decrypt + align steamid up front (sync, no network).
+    prepared = []
+    for acc in accounts:
         secrets = _server_secrets(acc)
         _sync_steam_id(acc, secrets)
-        try:
-            items, new_refresh = await steam.list_confirmations(acc.id, secrets, acc.steam_id, acc.proxy)
-            out.extend(items)
-            await _persist_new_refresh(db, acc, new_refresh)
-        except Exception as exc:  # noqa: BLE001
-            errors.append({"accountId": acc.id, "error": str(exc)})
+        prepared.append((acc, secrets))
+
+    sem = asyncio.Semaphore(_CONFIRMATIONS_CONCURRENCY)
+
+    async def fetch(acc: SteamAccount, secrets: dict):
+        async with sem:
+            return await steam.list_confirmations(acc.id, secrets, acc.steam_id, acc.proxy)
+
+    results = await asyncio.gather(
+        *(fetch(acc, secrets) for acc, secrets in prepared), return_exceptions=True
+    )
+
+    out: list[dict] = []
+    errors: list[dict] = []
+    for (acc, _), result in zip(prepared, results):
+        if isinstance(result, Exception):
+            errors.append({"accountId": acc.id, "error": str(result)})
+            continue
+        items, new_refresh = result
+        out.extend(items)
+        _apply_new_refresh(acc, new_refresh)  # mutate only; commit once below
+
     await db.commit()
     return {"confirmations": out, "errors": errors}
 
