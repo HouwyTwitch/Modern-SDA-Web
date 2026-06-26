@@ -82,3 +82,23 @@ class QrApproveRequest(BaseModel):
 class ActRequest(BaseModel):
     action: str  # "allow" | "cancel"
     nonce: str | None = None  # confirmation key; lets us act without re-listing
+
+
+# ---- create new authenticator (enrollment) ----
+class EnrollLoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class EnrollConfirmRequest(BaseModel):
+    enrollId: str
+    emailCode: str | None = None
+
+
+class EnrollFinalizeRequest(BaseModel):
+    enrollId: str
+    smsCode: str
+
+
+class EnrollCancelRequest(BaseModel):
+    enrollId: str

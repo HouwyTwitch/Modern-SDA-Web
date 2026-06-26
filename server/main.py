@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import enroll
 import steam_guard
 import steam_service as steam
 import server_crypto
@@ -43,6 +44,10 @@ from schemas import (
     AddAccountRequest,
     AuthResponse,
     CodeOut,
+    EnrollCancelRequest,
+    EnrollConfirmRequest,
+    EnrollFinalizeRequest,
+    EnrollLoginRequest,
     LoginRequest,
     QrApproveRequest,
     RegisterRequest,
@@ -525,6 +530,84 @@ async def qr_approve(
         raise HTTPException(status_code=502, detail=f"Steam error: {exc}") from exc
     await _persist_new_refresh(db, acc, result.pop("new_refresh", None))
     return result
+
+
+# ---------------- create a new authenticator (enrollment) ----------------
+@app.post("/api/enroll/login")
+async def enroll_login(
+    req: EnrollLoginRequest,
+    request: Request,
+    principal: Principal = Depends(current_principal),
+):
+    rate_limit(f"enroll:{client_ip(request)}", limit=10, window=900)
+    try:
+        enroll_id, step = await enroll.begin_login(req.username.strip(), req.password, principal.user.id)
+    except enroll.EnrollError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"enrollId": enroll_id, "step": step}
+
+
+@app.post("/api/enroll/confirm")
+async def enroll_confirm(
+    req: EnrollConfirmRequest, principal: Principal = Depends(current_principal)
+):
+    """Submit the email guard code (if needed) and request the authenticator.
+    Steam then texts an SMS code to the account's phone."""
+    try:
+        if req.emailCode:
+            await enroll.submit_email_code(req.enrollId, req.emailCode, principal.user.id)
+        info = await enroll.add_authenticator(req.enrollId, principal.user.id)
+    except enroll.EnrollError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"step": "sms", **info}
+
+
+@app.post("/api/enroll/finalize")
+async def enroll_finalize(
+    req: EnrollFinalizeRequest,
+    principal: Principal = Depends(current_principal),
+    db: AsyncSession = Depends(get_db),
+):
+    """Activate with the SMS code, save the new account, and return the maFile."""
+    user_key = principal.user_key
+    if user_key is None:
+        raise HTTPException(status_code=401, detail="Session locked — please sign in again")
+    try:
+        mafile = await enroll.finalize(req.enrollId, req.smsCode, principal.user.id)
+    except enroll.EnrollError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    steam_id = str(mafile["Session"]["SteamID"])
+    name = mafile.get("account_name") or (f"Account {steam_id[-4:]}" if steam_id else "New Account")
+    fields = {
+        "shared_secret": mafile.get("shared_secret"),
+        "identity_secret": mafile.get("identity_secret"),
+        "account_name": mafile.get("account_name"),
+        "refresh_token": mafile["Session"].get("RefreshToken"),
+        "password": None,
+    }
+    acc = SteamAccount(
+        user_id=principal.user.id,
+        name=name,
+        steam_id=steam_id,
+        avatar_color=_avatar_color(name + steam_id),
+        avatar_url=await steam.fetch_avatar(steam_id),
+        has_identity=bool(fields["identity_secret"]),
+        has_session=bool(fields["refresh_token"]),
+        status="online" if fields["refresh_token"] else "offline",
+        secrets_blob=vault.encrypt_secrets(fields, user_key),
+    )
+    db.add(acc)
+    await db.commit()
+    return {"maFile": mafile, "account": _account_out(acc)}
+
+
+@app.post("/api/enroll/cancel")
+async def enroll_cancel(
+    req: EnrollCancelRequest, principal: Principal = Depends(current_principal)
+):
+    await enroll.discard(req.enrollId, principal.user.id)
+    return {"ok": True}
 
 
 # ---------------- frontend (single-server mode) ----------------

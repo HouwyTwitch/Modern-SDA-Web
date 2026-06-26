@@ -118,4 +118,22 @@ export const api = {
       `/accounts/${accountId}/qr-approve`,
       { challenge_url: challengeUrl, confirm },
     ),
+
+  // ---- enrollment (create a new authenticator) ----
+  enrollLogin: (username: string, password: string) =>
+    request<{ enrollId: string; step: "email_code" | "ready" }>("POST", "/enroll/login", {
+      username,
+      password,
+    }),
+  enrollConfirm: (enrollId: string, emailCode?: string) =>
+    request<{ step: "sms"; accountName: string; revocationCode: string }>("POST", "/enroll/confirm", {
+      enrollId,
+      emailCode,
+    }),
+  enrollFinalize: (enrollId: string, smsCode: string) =>
+    request<{ maFile: Record<string, unknown>; account: Account }>("POST", "/enroll/finalize", {
+      enrollId,
+      smsCode,
+    }),
+  enrollCancel: (enrollId: string) => request<{ ok: boolean }>("POST", "/enroll/cancel", { enrollId }),
 };

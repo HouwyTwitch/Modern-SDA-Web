@@ -20,6 +20,7 @@ and [Modern-SDA-Android](https://github.com/HouwyTwitch/Modern-SDA-Android).
 ## ✨ Features
 
 - 👤 **Multi-user** — each person signs in and manages their own private set of Steam accounts.
+- 🆕 **Create new authenticators** — enroll Steam Guard on an account and generate a `.maFile` (SteamAuth logic).
 - 🔑 **Live Steam Guard codes** — rotating every 30s with animated countdown rings.
 - 🔄 **Live confirmations** — view, approve, decline, and bulk-accept trade & market confirmations.
 - 📷 **QR login approval** — approve a Steam "sign in with QR" by pasting/scanning the QR image or link.
