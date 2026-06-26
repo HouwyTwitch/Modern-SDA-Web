@@ -131,9 +131,10 @@ export const api = {
       emailCode,
     }),
   enrollFinalize: (enrollId: string, smsCode: string) =>
-    request<{ maFile: Record<string, unknown>; account: Account }>("POST", "/enroll/finalize", {
-      enrollId,
-      smsCode,
-    }),
+    request<{ maFile: Record<string, unknown>; account: Account | null; saved: boolean }>(
+      "POST",
+      "/enroll/finalize",
+      { enrollId, smsCode },
+    ),
   enrollCancel: (enrollId: string) => request<{ ok: boolean }>("POST", "/enroll/cancel", { enrollId }),
 };

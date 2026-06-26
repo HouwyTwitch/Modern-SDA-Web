@@ -568,38 +568,46 @@ async def enroll_finalize(
     principal: Principal = Depends(current_principal),
     db: AsyncSession = Depends(get_db),
 ):
-    """Activate with the SMS code, save the new account, and return the maFile."""
-    user_key = principal.user_key
-    if user_key is None:
-        raise HTTPException(status_code=401, detail="Session locked — please sign in again")
+    """Activate with the SMS code, then save the new account and return the maFile.
+
+    The Steam activation is irreversible, so we ALWAYS return the maFile (the user
+    must be able to download it). Saving to the vault needs the unlock key; if the
+    session has locked, we still return the maFile with saved=false so nothing is
+    lost — the user can re-import it after signing in again.
+    """
     try:
         mafile = await enroll.finalize(req.enrollId, req.smsCode, principal.user.id)
     except enroll.EnrollError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    steam_id = str(mafile["Session"]["SteamID"])
-    name = mafile.get("account_name") or (f"Account {steam_id[-4:]}" if steam_id else "New Account")
-    fields = {
-        "shared_secret": mafile.get("shared_secret"),
-        "identity_secret": mafile.get("identity_secret"),
-        "account_name": mafile.get("account_name"),
-        "refresh_token": mafile["Session"].get("RefreshToken"),
-        "password": None,
-    }
-    acc = SteamAccount(
-        user_id=principal.user.id,
-        name=name,
-        steam_id=steam_id,
-        avatar_color=_avatar_color(name + steam_id),
-        avatar_url=await steam.fetch_avatar(steam_id),
-        has_identity=bool(fields["identity_secret"]),
-        has_session=bool(fields["refresh_token"]),
-        status="online" if fields["refresh_token"] else "offline",
-        secrets_blob=vault.encrypt_secrets(fields, user_key),
-    )
-    db.add(acc)
-    await db.commit()
-    return {"maFile": mafile, "account": _account_out(acc)}
+    account = None
+    user_key = principal.user_key
+    if user_key is not None:
+        steam_id = str(mafile["Session"]["SteamID"])
+        name = mafile.get("account_name") or (f"Account {steam_id[-4:]}" if steam_id else "New Account")
+        fields = {
+            "shared_secret": mafile.get("shared_secret"),
+            "identity_secret": mafile.get("identity_secret"),
+            "account_name": mafile.get("account_name"),
+            "refresh_token": mafile["Session"].get("RefreshToken"),
+            "password": None,
+        }
+        acc = SteamAccount(
+            user_id=principal.user.id,
+            name=name,
+            steam_id=steam_id,
+            avatar_color=_avatar_color(name + steam_id),
+            avatar_url=await steam.fetch_avatar(steam_id),
+            has_identity=bool(fields["identity_secret"]),
+            has_session=bool(fields["refresh_token"]),
+            status="online" if fields["refresh_token"] else "offline",
+            secrets_blob=vault.encrypt_secrets(fields, user_key),
+        )
+        db.add(acc)
+        await db.commit()
+        account = _account_out(acc)
+
+    return {"maFile": mafile, "account": account, "saved": account is not None}
 
 
 @app.post("/api/enroll/cancel")

@@ -77,12 +77,14 @@ export function EnrollWizard({ onClose }: Props) {
   const confirmEmail = () => run(() => requestSms(enrollId, emailCode.trim()));
   const confirmApproved = () => run(() => requestSms(enrollId));
 
+  const [saved, setSaved] = useState(true);
   const finalize = () =>
     run(async () => {
       const res = await api.enrollFinalize(enrollId, smsCode.trim());
       setMaFile(res.maFile);
+      setSaved(res.saved);
       setStep("done");
-      await loadAccounts();
+      if (res.saved) await loadAccounts();
       pushToast("Authenticator created", "success");
     });
 
@@ -199,9 +201,18 @@ export function EnrollWizard({ onClose }: Props) {
           <div>
             <p className="font-semibold">Authenticator created 🎉</p>
             <p className="text-sm text-ink-muted">
-              {accountName} is now added. Download and back up the .maFile — it's the only copy.
+              {saved
+                ? `${accountName} is now added. Download and back up the .maFile — it's the only copy.`
+                : "Download and back up the .maFile now — it's the only copy."}
             </p>
           </div>
+          {!saved && (
+            <div className="flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-left text-sm text-amber-300">
+              <AlertTriangle size={18} className="mt-0.5 shrink-0" />
+              Your session had locked, so the account wasn't added automatically. Download the
+              .maFile, sign in again, and add it via <span className="font-medium">Import .maFile</span>.
+            </div>
+          )}
           <div className="rounded-xl bg-surface-sunken p-3 text-left text-sm">
             <div className="text-ink-muted">Revocation code</div>
             <div className="font-mono text-base font-bold text-accent">{revocationCode}</div>
