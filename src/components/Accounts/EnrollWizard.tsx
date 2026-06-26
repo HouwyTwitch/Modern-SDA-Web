@@ -3,7 +3,9 @@ import { Loader2, ShieldPlus, KeyRound, Mail, Smartphone, Download, Check, Alert
 import { api } from "../../lib/api";
 import { useStore } from "../../store/useStore";
 
-type Step = "creds" | "email" | "sms" | "done";
+type Step = "creds" | "email" | "confirm" | "sms" | "done";
+
+const STEP_POSITION: Record<Step, number> = { creds: 0, email: 1, confirm: 1, sms: 2, done: 3 };
 
 interface Props {
   onClose: () => void;
@@ -56,27 +58,24 @@ export function EnrollWizard({ onClose }: Props) {
     }
   }
 
+  async function requestSms(id: string, code?: string) {
+    const info = await api.enrollConfirm(id, code);
+    setAccountName(info.accountName);
+    setRevocationCode(info.revocationCode);
+    setStep("sms");
+  }
+
   const login = () =>
     run(async () => {
       const res = await api.enrollLogin(username.trim(), password);
       setEnrollId(res.enrollId);
-      if (res.step === "ready") {
-        const info = await api.enrollConfirm(res.enrollId);
-        setAccountName(info.accountName);
-        setRevocationCode(info.revocationCode);
-        setStep("sms");
-      } else {
-        setStep("email");
-      }
+      if (res.step === "ready") await requestSms(res.enrollId);
+      else if (res.step === "confirm") setStep("confirm");
+      else setStep("email");
     });
 
-  const confirmEmail = () =>
-    run(async () => {
-      const info = await api.enrollConfirm(enrollId, emailCode.trim());
-      setAccountName(info.accountName);
-      setRevocationCode(info.revocationCode);
-      setStep("sms");
-    });
+  const confirmEmail = () => run(() => requestSms(enrollId, emailCode.trim()));
+  const confirmApproved = () => run(() => requestSms(enrollId));
 
   const finalize = () =>
     run(async () => {
@@ -105,7 +104,7 @@ export function EnrollWizard({ onClose }: Props) {
     { id: "sms", icon: Smartphone, label: "SMS" },
     { id: "done", icon: Check, label: "Done" },
   ];
-  const activeIdx = steps.findIndex((s) => s.id === step);
+  const activeIdx = STEP_POSITION[step];
 
   return (
     <div>
@@ -154,6 +153,19 @@ export function EnrollWizard({ onClose }: Props) {
           <Field label="Email code" value={emailCode} onChange={setEmailCode} placeholder="ABCDE" autoFocus mono />
           <Action onClick={confirmEmail} busy={busy} disabled={!emailCode} icon={<Mail size={16} />}>
             Verify & request SMS
+          </Action>
+        </div>
+      )}
+
+      {step === "confirm" && (
+        <div className="space-y-3">
+          <div className="flex items-start gap-2 rounded-xl bg-accent-soft p-3 text-sm text-ink-muted">
+            <Mail size={18} className="mt-0.5 shrink-0 text-accent" />
+            Steam sent a confirmation to this account. Approve it by clicking the link in the email
+            (or approving in your Steam mobile app), then continue.
+          </div>
+          <Action onClick={confirmApproved} busy={busy} icon={<Check size={16} />}>
+            I approved it — continue
           </Action>
         </div>
       )}

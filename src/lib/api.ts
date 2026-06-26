@@ -121,7 +121,7 @@ export const api = {
 
   // ---- enrollment (create a new authenticator) ----
   enrollLogin: (username: string, password: string) =>
-    request<{ enrollId: string; step: "email_code" | "ready" }>("POST", "/enroll/login", {
+    request<{ enrollId: string; step: "email_code" | "confirm" | "ready" }>("POST", "/enroll/login", {
       username,
       password,
     }),

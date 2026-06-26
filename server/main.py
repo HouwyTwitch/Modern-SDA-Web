@@ -551,11 +551,11 @@ async def enroll_login(
 async def enroll_confirm(
     req: EnrollConfirmRequest, principal: Principal = Depends(current_principal)
 ):
-    """Submit the email guard code (if needed) and request the authenticator.
-    Steam then texts an SMS code to the account's phone."""
+    """Obtain the access token (via email code, or after the user approves the
+    email link / Steam app) and request the authenticator. Steam then texts an
+    SMS code to the account's phone."""
     try:
-        if req.emailCode:
-            await enroll.submit_email_code(req.enrollId, req.emailCode, principal.user.id)
+        await enroll.obtain_token(req.enrollId, principal.user.id, req.emailCode)
         info = await enroll.add_authenticator(req.enrollId, principal.user.id)
     except enroll.EnrollError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

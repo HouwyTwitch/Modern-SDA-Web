@@ -21,11 +21,21 @@ import asyncio
 import base64
 import time
 import uuid
+from base64 import b64encode
 
 import httpx
-from aiosteampy import SteamClient
+from aiosteampy import SteamClient, auth_pb2
+from aiosteampy.constants import STEAM_URL
+from rsa import encrypt as rsa_encrypt
 
 import steam_guard
+
+# EAuthSessionGuardType values we care about.
+_GUARD_EMAIL_CODE = 2
+_GUARD_DEVICE_CODE = 3
+_GUARD_DEVICE_CONFIRM = 4
+_GUARD_EMAIL_CONFIRM = 5
+_REFERER = {"Referer": str(STEAM_URL.COMMUNITY) + "/"}
 
 API = "https://api.steampowered.com"
 MOBILE_UA = (
@@ -91,54 +101,103 @@ async def discard(enroll_id: str, owner: str) -> None:
 
 
 # ---------------- step 1: credentials login ----------------
+async def _begin_session(client: SteamClient) -> dict:
+    """Begin a credentials auth session using the MobileApp platform (the
+    authenticator flow), parsing the full response incl. allowed_confirmations."""
+    pub_key, ts = await client._get_rsa_key()
+
+    device_details = auth_pb2.CAuthentication_BeginAuthSessionViaCredentials_Request.DeviceDetails()
+    device_details.device_friendly_name = "Modern SDA Web"
+    device_details.platform_type = auth_pb2.k_EAuthTokenPlatformType_MobileApp
+
+    req = auth_pb2.CAuthentication_BeginAuthSessionViaCredentials_Request()
+    req.account_name = client.username
+    req.encrypted_password = b64encode(rsa_encrypt(client._password.encode("utf-8"), pub_key)).decode()
+    req.encryption_timestamp = ts
+    req.remember_login = 1
+    req.persistence = 1
+    req.website_id = "Mobile"
+    req.device_details.CopyFrom(device_details)
+    req.additional_field = 8
+
+    r = await client.session.post(
+        STEAM_URL.API.IAuthService.BeginAuthSessionViaCredentials,
+        data={"input_protobuf_encoded": b64encode(req.SerializeToString()).decode()},
+        headers=_REFERER,
+    )
+    resp = auth_pb2.CAuthentication_BeginAuthSessionViaCredentials_Response()
+    resp.ParseFromString(await r.read())
+    return {
+        "client_id": resp.client_id,
+        "request_id": resp.request_id,
+        "steamid": str(resp.steamid),
+        "guards": [c.confirmation_type for c in resp.allowed_confirmations],
+    }
+
+
 async def begin_login(username: str, password: str, owner: str) -> tuple[str, str]:
-    """Start a credentials login. Returns (enroll_id, next_step) where next_step
-    is 'email_code' (Steam emailed a code) or 'ready' (no guard code needed)."""
+    """Start a credentials login. Returns (enroll_id, next_step):
+      - 'email_code' : Steam emailed a code to enter
+      - 'confirm'    : approve via the email link or the Steam app, then continue
+      - 'ready'      : no guard — continue immediately
+    """
     _gc()
     client = SteamClient(0, username, password, _DUMMY_SECRET, user_agent=MOBILE_UA)
     try:
         await client.session.get("https://steamcommunity.com")
-        data = await client._begin_auth_session_with_credentials()
+        data = await _begin_session(client)
     except Exception as exc:  # noqa: BLE001
         await _safe_close(client)
         raise EnrollError(f"Could not start Steam login: {exc}") from exc
 
-    resp = data.get("response") or {}
-    if not resp.get("client_id"):
+    if not data["client_id"]:
         await _safe_close(client)
         raise EnrollError("Steam rejected the username/password.")
 
+    guards = data["guards"]
+    if _GUARD_DEVICE_CODE in guards:
+        await _safe_close(client)
+        raise EnrollError("This account already has a mobile authenticator.")
+
     p = _Pending(client, gen_device_id(), owner)
-    p.client_id = resp["client_id"]
-    p.request_id = resp["request_id"]
-    p.steamid = str(resp.get("steamid") or "")
+    p.client_id = data["client_id"]
+    p.request_id = data["request_id"]
+    p.steamid = data["steamid"]
     enroll_id = str(uuid.uuid4())
     _pending[enroll_id] = p
 
-    # Some accounts need no guard code — try a single poll to detect that.
-    try:
-        access, refresh = await client._poll_auth_session_status(p.client_id, p.request_id)
-        if access:
-            p.access_token, p.refresh_token = access, refresh
-            return enroll_id, "ready"
-    except Exception:
-        pass
-    return enroll_id, "email_code"
+    if _GUARD_EMAIL_CODE in guards:
+        return enroll_id, "email_code"
+    if _GUARD_EMAIL_CONFIRM in guards or _GUARD_DEVICE_CONFIRM in guards:
+        return enroll_id, "confirm"
+    return enroll_id, "ready"
 
 
-# ---------------- step 2: email guard code ----------------
-async def submit_email_code(enroll_id: str, code: str, owner: str) -> None:
+# ---------------- step 2: obtain access token ----------------
+async def obtain_token(enroll_id: str, owner: str, email_code: str | None = None) -> None:
+    """Submit the email code (if any) and poll for the access token. For the
+    'confirm' flow the user must approve the email link / Steam app first."""
     p = _get(enroll_id, owner)
     try:
-        await p.client.session.post(
-            f"{API}/IAuthenticationService/UpdateAuthSessionWithSteamGuardCode/v1/",
-            data={"client_id": p.client_id, "steamid": p.steamid, "code_type": 2, "code": code.strip()},
-        )
+        if email_code:
+            await p.client.session.post(
+                STEAM_URL.API.IAuthService.UpdateAuthSessionWithSteamGuardCode,
+                data={"client_id": p.client_id, "steamid": p.steamid, "code_type": 2, "code": email_code.strip()},
+                headers=_REFERER,
+            )
         access, refresh = await p.client._poll_auth_session_status(p.client_id, p.request_id)
     except Exception as exc:  # noqa: BLE001
-        raise EnrollError(f"Login failed — wrong code? ({exc})") from exc
+        raise EnrollError(
+            "Login not confirmed yet — approve it (email link / Steam app) or check the code, then retry."
+            if not email_code
+            else f"Login failed — wrong code? ({exc})"
+        ) from exc
     if not access:
-        raise EnrollError("Login failed — the code may be incorrect or expired.")
+        raise EnrollError(
+            "Login not confirmed yet — approve the email/app prompt, then continue."
+            if not email_code
+            else "Login failed — the code may be incorrect or expired."
+        )
     p.access_token, p.refresh_token = access, refresh
 
 
