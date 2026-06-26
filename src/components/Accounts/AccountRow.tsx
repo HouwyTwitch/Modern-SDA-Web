@@ -4,7 +4,7 @@ import type { Account } from "../../types";
 import { Avatar } from "../common/Avatar";
 import { StatusBadge } from "../common/StatusBadge";
 import { CountdownRing } from "../common/CountdownRing";
-import { CodeDisplay } from "../common/CodeDisplay";
+import { useStore } from "../../store/useStore";
 
 interface Props {
   account: Account;
@@ -13,13 +13,19 @@ interface Props {
 }
 
 export function AccountRow({ account, remaining, onOpen }: Props) {
+  const pushToast = useStore((s) => s.pushToast);
   const [copied, setCopied] = useState(false);
   const code = account.code ?? "•••••";
 
   async function copyCode(e: React.MouseEvent) {
-    e.stopPropagation();
-    await navigator.clipboard.writeText(code);
+    e.stopPropagation(); // copy the code instead of opening the account
+    try {
+      await navigator.clipboard.writeText(code);
+    } catch {
+      /* clipboard may be unavailable */
+    }
     setCopied(true);
+    pushToast("Code copied", "success");
     setTimeout(() => setCopied(false), 1200);
   }
 
@@ -45,21 +51,25 @@ export function AccountRow({ account, remaining, onOpen }: Props) {
         </div>
       </div>
 
-      <div className="flex items-center gap-3 sm:gap-4">
-        <div onClick={copyCode} className="hidden sm:block" role="button" tabIndex={-1}>
-          <CodeDisplay code={code} size="md" />
-        </div>
-        <span className="font-mono text-xl font-bold tracking-wider text-accent sm:hidden">{code}</span>
-        <CountdownRing remaining={remaining} />
-        <span
+      <div className="flex items-center gap-2 sm:gap-3">
+        {/* Tap the code itself to copy (works on mobile too). */}
+        <button
           onClick={copyCode}
-          className="hidden text-ink-faint opacity-0 transition hover:text-ink group-hover:opacity-100 sm:inline"
-          role="button"
-          tabIndex={-1}
+          title="Copy code"
+          className="font-mono text-xl font-bold tracking-wider text-accent active:scale-95 sm:text-2xl"
+        >
+          {code}
+        </button>
+        <CountdownRing remaining={remaining} />
+        {/* Single copy button, just left of the actions menu. */}
+        <button
+          onClick={copyCode}
+          aria-label="Copy code"
+          className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-ink-faint transition hover:bg-surface-sunken hover:text-ink"
         >
           {copied ? <Check size={16} className="text-green-400" /> : <Copy size={16} />}
-        </span>
-        <MoreHorizontal size={18} className="text-ink-faint" />
+        </button>
+        <MoreHorizontal size={18} className="shrink-0 text-ink-faint" />
       </div>
     </div>
   );

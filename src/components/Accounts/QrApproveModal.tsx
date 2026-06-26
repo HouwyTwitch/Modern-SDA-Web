@@ -95,31 +95,68 @@ export function QrApproveModal({ account, open, onClose }: Props) {
 
   async function startScan() {
     setError(undefined);
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setError("Camera needs a secure (https) connection. Paste the QR image or link instead.");
+      return;
+    }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+      // Acquire the stream first; the <video> is attached in the effect below
+      // once React has actually mounted it (avoids a null-ref race on mobile).
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: "environment" } },
+        audio: false,
+      });
       streamRef.current = stream;
       setScanning(true);
-      const video = videoRef.current!;
-      video.srcObject = stream;
-      await video.play();
-      const loop = () => {
-        if (!streamRef.current || !videoRef.current) return;
-        const v = videoRef.current;
-        const result = decodeFromSource(v, v.videoWidth, v.videoHeight);
-        if (result) {
-          setUrl(result);
-          pushToast("QR detected", "success");
-          stopScan();
-          return;
-        }
-        rafRef.current = requestAnimationFrame(loop);
-      };
-      rafRef.current = requestAnimationFrame(loop);
-    } catch {
-      setError("Could not access camera. Paste the QR image or link instead.");
-      setScanning(false);
+    } catch (e) {
+      const name = (e as DOMException)?.name;
+      setError(
+        name === "NotAllowedError"
+          ? "Camera permission was denied."
+          : "Could not access the camera. Paste the QR image or link instead.",
+      );
+      stopScan();
     }
   }
+
+  // Attach the acquired stream to the video element after it mounts, then scan.
+  useEffect(() => {
+    if (!scanning) return;
+    const video = videoRef.current;
+    const stream = streamRef.current;
+    if (!video || !stream) return;
+
+    let cancelled = false;
+    video.srcObject = stream;
+
+    const tick = () => {
+      if (cancelled || !streamRef.current || !videoRef.current) return;
+      const v = videoRef.current;
+      const result = decodeFromSource(v, v.videoWidth, v.videoHeight);
+      if (result) {
+        setUrl(result);
+        pushToast("QR detected", "success");
+        stopScan();
+        return;
+      }
+      rafRef.current = requestAnimationFrame(tick);
+    };
+
+    video
+      .play()
+      .catch(() => {
+        /* autoplay quirks — scanning still works once frames arrive */
+      })
+      .finally(() => {
+        if (!cancelled) rafRef.current = requestAnimationFrame(tick);
+      });
+
+    return () => {
+      cancelled = true;
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scanning]);
 
   async function act(confirm: boolean) {
     setError(undefined);
