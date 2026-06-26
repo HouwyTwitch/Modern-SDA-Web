@@ -245,7 +245,8 @@ async def add_authenticator(enroll_id: str, owner: str) -> dict:
     if status == 2:
         raise EnrollError("This account has no phone number. Add a phone in Steam first, then retry.")
     if status == 29:
-        raise EnrollError("This account already has an authenticator.")
+        # Already has an authenticator — offer to move it here (confirm in the old app).
+        return {"present": True}
     if status != 1:
         raise EnrollError(f"Steam rejected enrollment (status {status}).")
 
@@ -339,3 +340,137 @@ def _build_mafile(p: _Pending) -> dict:
             "OAuthToken": None,
         },
     }
+
+
+# ---------------- move authenticator (confirm in the existing app) ----------------
+# Steam's RemoveAuthenticatorViaChallenge flow: start a challenge, the user
+# approves it in their existing Steam Guard (or via SMS), then continue — which
+# removes the old authenticator and returns a brand-new one (the replacement
+# token = a fresh maFile). We parse the protobuf response with a tiny self-
+# contained reader so we don't couple to a generated _pb2 module.
+def _read_varint(buf: bytes, i: int) -> tuple[int, int]:
+    shift = result = 0
+    while True:
+        b = buf[i]
+        i += 1
+        result |= (b & 0x7F) << shift
+        if not (b & 0x80):
+            return result, i
+        shift += 7
+
+
+def _pb_parse(buf: bytes) -> dict[int, list]:
+    """Minimal protobuf wire-format reader -> {field_number: [values]}.
+    Varints are ints; length-delimited are bytes; fixed64/32 are raw bytes."""
+    fields: dict[int, list] = {}
+    i, n = 0, len(buf)
+    while i < n:
+        tag, i = _read_varint(buf, i)
+        fnum, wt = tag >> 3, tag & 7
+        if wt == 0:
+            v, i = _read_varint(buf, i)
+        elif wt == 2:
+            ln, i = _read_varint(buf, i)
+            v, i = buf[i : i + ln], i + ln
+        elif wt == 1:
+            v, i = buf[i : i + 8], i + 8
+        elif wt == 5:
+            v, i = buf[i : i + 4], i + 4
+        else:
+            break
+        fields.setdefault(fnum, []).append(v)
+    return fields
+
+
+def _encode_continue(sms_code: str | None) -> bytes:
+    """Encode CTwoFactor_RemoveAuthenticatorViaChallengeContinue_Request."""
+    out = b""
+    if sms_code:
+        sc = sms_code.strip().encode()
+        out += b"\x0a" + bytes([len(sc)]) + sc  # field 1 (sms_code, string)
+    out += b"\x10\x01"  # field 2 (generate_new_token = true)
+    out += b"\x18\x01"  # field 3 (version = 1)
+    return out
+
+
+async def move_start(enroll_id: str, owner: str) -> None:
+    """Begin the challenge — Steam asks the existing authenticator to confirm."""
+    p = _get(enroll_id, owner)
+    if not p.access_token:
+        raise EnrollError("Not signed in yet.")
+    await _post(
+        f"{API}/ITwoFactorService/RemoveAuthenticatorViaChallengeStart/v1/?access_token={p.access_token}",
+        {"input_protobuf_encoded": ""},
+    )
+
+
+def _bytes_b64(v) -> str | None:
+    return base64.b64encode(v).decode() if isinstance(v, (bytes, bytearray)) and v else None
+
+
+def _decode_str(v) -> str | None:
+    return v.decode("utf-8", "replace") if isinstance(v, (bytes, bytearray)) else None
+
+
+async def move_continue(enroll_id: str, owner: str, sms_code: str | None = None) -> dict:
+    """Complete the move. On success returns the new maFile (replacement token)."""
+    p = _get(enroll_id, owner)
+    if not p.access_token:
+        raise EnrollError("Not signed in yet.")
+
+    encoded = base64.b64encode(_encode_continue(sms_code)).decode()
+    r = await _post(
+        f"{API}/ITwoFactorService/RemoveAuthenticatorViaChallengeContinue/v1/?access_token={p.access_token}",
+        {"input_protobuf_encoded": encoded},
+    )
+    fields = _pb_parse(r.content)
+    token_msgs = fields.get(2)
+    if not token_msgs:
+        raise EnrollError(
+            "Not confirmed yet — approve the request in your existing Steam Guard app "
+            "(or enter the SMS code Steam sent), then continue."
+        )
+
+    t = _pb_parse(token_msgs[0])
+
+    def first(fn: int):
+        vals = t.get(fn)
+        return vals[0] if vals else None
+
+    steamid_b = first(12)  # fixed64
+    steamid = (
+        str(int.from_bytes(steamid_b, "little"))
+        if isinstance(steamid_b, (bytes, bytearray)) and len(steamid_b) == 8
+        else (p.steamid or "0")
+    )
+    serial_b = first(2)  # fixed64
+    mafile = {
+        "shared_secret": _bytes_b64(first(1)),
+        "serial_number": str(int.from_bytes(serial_b, "little"))
+        if isinstance(serial_b, (bytes, bytearray)) and len(serial_b) == 8
+        else None,
+        "revocation_code": _decode_str(first(3)),
+        "uri": _decode_str(first(4)),
+        "server_time": first(5),  # uint64 varint -> int
+        "account_name": _decode_str(first(6)),
+        "token_gid": _decode_str(first(7)),
+        "identity_secret": _bytes_b64(first(8)),
+        "secret_1": _bytes_b64(first(9)),
+        "status": first(10),  # int32 varint -> int
+        "device_id": p.device_id,
+        "fully_enrolled": True,
+        "Session": {
+            "SteamID": int(steamid) if steamid.isdigit() else 0,
+            "AccessToken": p.access_token,
+            "RefreshToken": p.refresh_token,
+            "SessionID": "",
+            "WebCookie": None,
+            "OAuthToken": None,
+        },
+    }
+    if not mafile["shared_secret"]:
+        raise EnrollError("Steam did not return a new authenticator. Please try again.")
+
+    _pending.pop(enroll_id, None)
+    await _safe_close(p.client)
+    return mafile

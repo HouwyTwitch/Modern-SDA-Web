@@ -136,10 +136,18 @@ export const api = {
       password,
     }),
   enrollConfirm: (enrollId: string, emailCode?: string) =>
-    request<{ step: "sms"; accountName: string; revocationCode: string }>("POST", "/enroll/confirm", {
-      enrollId,
-      emailCode,
-    }),
+    request<{ step: "sms" | "move"; accountName?: string; revocationCode?: string }>(
+      "POST",
+      "/enroll/confirm",
+      { enrollId, emailCode },
+    ),
+  enrollMoveStart: (enrollId: string) => request<{ ok: boolean }>("POST", "/enroll/move-start", { enrollId }),
+  enrollMoveContinue: (enrollId: string, smsCode?: string) =>
+    request<{ maFile: Record<string, unknown>; account: Account | null; saved: boolean }>(
+      "POST",
+      "/enroll/move-continue",
+      { enrollId, smsCode },
+    ),
   enrollFinalize: (enrollId: string, smsCode: string) =>
     request<{ maFile: Record<string, unknown>; account: Account | null; saved: boolean }>(
       "POST",

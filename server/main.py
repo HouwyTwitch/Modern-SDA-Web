@@ -48,6 +48,8 @@ from schemas import (
     EnrollConfirmRequest,
     EnrollFinalizeRequest,
     EnrollLoginRequest,
+    EnrollMoveContinueRequest,
+    EnrollMoveStartRequest,
     LoginRequest,
     QrApproveRequest,
     RegisterRequest,
@@ -559,7 +561,43 @@ async def enroll_confirm(
         info = await enroll.add_authenticator(req.enrollId, principal.user.id)
     except enroll.EnrollError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if info.get("present"):
+        # Account already has an authenticator — offer to move it here.
+        return {"step": "move"}
     return {"step": "sms", **info}
+
+
+async def _save_enrolled_account(
+    db: AsyncSession, principal: Principal, mafile: dict
+) -> dict | None:
+    """Save a freshly created/moved authenticator's maFile to the user's vault.
+    Returns the account dict, or None if the session is locked (key unavailable)."""
+    user_key = principal.user_key
+    if user_key is None:
+        return None
+    steam_id = str(mafile["Session"]["SteamID"])
+    name = mafile.get("account_name") or (f"Account {steam_id[-4:]}" if steam_id else "New Account")
+    fields = {
+        "shared_secret": mafile.get("shared_secret"),
+        "identity_secret": mafile.get("identity_secret"),
+        "account_name": mafile.get("account_name"),
+        "refresh_token": mafile["Session"].get("RefreshToken"),
+        "password": None,
+    }
+    acc = SteamAccount(
+        user_id=principal.user.id,
+        name=name,
+        steam_id=steam_id,
+        avatar_color=_avatar_color(name + steam_id),
+        avatar_url=await steam.fetch_avatar(steam_id),
+        has_identity=bool(fields["identity_secret"]),
+        has_session=bool(fields["refresh_token"]),
+        status="online" if fields["refresh_token"] else "offline",
+        secrets_blob=vault.encrypt_secrets(fields, user_key),
+    )
+    db.add(acc)
+    await db.commit()
+    return _account_out(acc)
 
 
 @app.post("/api/enroll/finalize")
@@ -579,34 +617,34 @@ async def enroll_finalize(
         mafile = await enroll.finalize(req.enrollId, req.smsCode, principal.user.id)
     except enroll.EnrollError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    account = await _save_enrolled_account(db, principal, mafile)
+    return {"maFile": mafile, "account": account, "saved": account is not None}
 
-    account = None
-    user_key = principal.user_key
-    if user_key is not None:
-        steam_id = str(mafile["Session"]["SteamID"])
-        name = mafile.get("account_name") or (f"Account {steam_id[-4:]}" if steam_id else "New Account")
-        fields = {
-            "shared_secret": mafile.get("shared_secret"),
-            "identity_secret": mafile.get("identity_secret"),
-            "account_name": mafile.get("account_name"),
-            "refresh_token": mafile["Session"].get("RefreshToken"),
-            "password": None,
-        }
-        acc = SteamAccount(
-            user_id=principal.user.id,
-            name=name,
-            steam_id=steam_id,
-            avatar_color=_avatar_color(name + steam_id),
-            avatar_url=await steam.fetch_avatar(steam_id),
-            has_identity=bool(fields["identity_secret"]),
-            has_session=bool(fields["refresh_token"]),
-            status="online" if fields["refresh_token"] else "offline",
-            secrets_blob=vault.encrypt_secrets(fields, user_key),
-        )
-        db.add(acc)
-        await db.commit()
-        account = _account_out(acc)
 
+@app.post("/api/enroll/move-start")
+async def enroll_move_start(
+    req: EnrollMoveStartRequest, principal: Principal = Depends(current_principal)
+):
+    """Begin moving the existing authenticator — Steam asks the old app to confirm."""
+    try:
+        await enroll.move_start(req.enrollId, principal.user.id)
+    except enroll.EnrollError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True}
+
+
+@app.post("/api/enroll/move-continue")
+async def enroll_move_continue(
+    req: EnrollMoveContinueRequest,
+    principal: Principal = Depends(current_principal),
+    db: AsyncSession = Depends(get_db),
+):
+    """Complete the move after the user approved it; return the new maFile."""
+    try:
+        mafile = await enroll.move_continue(req.enrollId, principal.user.id, req.smsCode)
+    except enroll.EnrollError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    account = await _save_enrolled_account(db, principal, mafile)
     return {"maFile": mafile, "account": account, "saved": account is not None}
 
 

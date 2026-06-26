@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { Loader2, ShieldPlus, KeyRound, Mail, Smartphone, Download, Check, AlertTriangle } from "lucide-react";
+import { Loader2, ShieldPlus, KeyRound, Mail, Smartphone, Download, Check, AlertTriangle, ArrowLeftRight } from "lucide-react";
 import { api } from "../../lib/api";
 import { useStore } from "../../store/useStore";
 
-type Step = "creds" | "email" | "confirm" | "sms" | "done";
+type Step = "creds" | "email" | "confirm" | "sms" | "move" | "done";
 
-const STEP_POSITION: Record<Step, number> = { creds: 0, email: 1, confirm: 1, sms: 2, done: 3 };
+const STEP_POSITION: Record<Step, number> = { creds: 0, email: 1, confirm: 1, sms: 2, move: 2, done: 3 };
 
 interface Props {
   onClose: () => void;
@@ -28,11 +28,14 @@ export function EnrollWizard({ onClose }: Props) {
   const [password, setPassword] = useState("");
   const [emailCode, setEmailCode] = useState("");
   const [smsCode, setSmsCode] = useState("");
+  const [moveSms, setMoveSms] = useState("");
 
   const [enrollId, setEnrollId] = useState("");
   const [accountName, setAccountName] = useState("");
   const [revocationCode, setRevocationCode] = useState("");
   const [maFile, setMaFile] = useState<Record<string, unknown> | null>(null);
+  const [saved, setSaved] = useState(true);
+  const [doneTitle, setDoneTitle] = useState("Authenticator created");
 
   // Cancel an in-progress enrollment server-side if the user navigates away.
   const cleanup = useRef({ enrollId: "", done: false });
@@ -58,10 +61,15 @@ export function EnrollWizard({ onClose }: Props) {
     }
   }
 
-  async function requestSms(id: string, code?: string) {
+  async function proceed(id: string, code?: string) {
     const info = await api.enrollConfirm(id, code);
-    setAccountName(info.accountName);
-    setRevocationCode(info.revocationCode);
+    if (info.step === "move") {
+      await api.enrollMoveStart(id); // ask the existing authenticator to confirm
+      setStep("move");
+      return;
+    }
+    setAccountName(info.accountName ?? "");
+    setRevocationCode(info.revocationCode ?? "");
     setStep("sms");
   }
 
@@ -69,23 +77,35 @@ export function EnrollWizard({ onClose }: Props) {
     run(async () => {
       const res = await api.enrollLogin(username.trim(), password);
       setEnrollId(res.enrollId);
-      if (res.step === "ready") await requestSms(res.enrollId);
+      if (res.step === "ready") await proceed(res.enrollId);
       else if (res.step === "confirm") setStep("confirm");
       else setStep("email");
     });
 
-  const confirmEmail = () => run(() => requestSms(enrollId, emailCode.trim()));
-  const confirmApproved = () => run(() => requestSms(enrollId));
+  const confirmEmail = () => run(() => proceed(enrollId, emailCode.trim()));
+  const confirmApproved = () => run(() => proceed(enrollId));
 
-  const [saved, setSaved] = useState(true);
+  const completeFinalize = async (res: { maFile: Record<string, unknown>; saved: boolean }, title: string) => {
+    setMaFile(res.maFile);
+    setSaved(res.saved);
+    setDoneTitle(title);
+    setRevocationCode((prev) => (res.maFile.revocation_code as string) || prev);
+    setAccountName((prev) => (res.maFile.account_name as string) || prev);
+    setStep("done");
+    if (res.saved) await loadAccounts();
+    pushToast(title, "success");
+  };
+
+  const moveFinish = () =>
+    run(async () => {
+      const res = await api.enrollMoveContinue(enrollId, moveSms.trim() || undefined);
+      await completeFinalize(res, "Authenticator moved");
+    });
+
   const finalize = () =>
     run(async () => {
       const res = await api.enrollFinalize(enrollId, smsCode.trim());
-      setMaFile(res.maFile);
-      setSaved(res.saved);
-      setStep("done");
-      if (res.saved) await loadAccounts();
-      pushToast("Authenticator created", "success");
+      await completeFinalize(res, "Authenticator created");
     });
 
   function downloadMaFile() {
@@ -194,16 +214,38 @@ export function EnrollWizard({ onClose }: Props) {
         </div>
       )}
 
+      {step === "move" && (
+        <div className="space-y-3">
+          <div className="flex items-start gap-2 rounded-xl bg-accent-soft p-3 text-sm text-ink-muted">
+            <ArrowLeftRight size={18} className="mt-0.5 shrink-0 text-accent" />
+            This account already has an authenticator. To move it here, open your existing Steam Guard
+            and approve the request (tap the confirm button). If Steam texted you a code instead, enter
+            it below — then continue.
+          </div>
+          <Field
+            label="SMS code (only if Steam texted you)"
+            value={moveSms}
+            onChange={setMoveSms}
+            placeholder="optional"
+            mono
+            onEnter={moveFinish}
+          />
+          <Action onClick={moveFinish} busy={busy} icon={<Check size={16} />}>
+            I approved it — move authenticator here
+          </Action>
+        </div>
+      )}
+
       {step === "done" && (
         <div className="space-y-4 text-center">
           <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-green-500/10 text-green-400">
             <Check size={28} />
           </div>
           <div>
-            <p className="font-semibold">Authenticator created 🎉</p>
-            <p className="text-sm text-ink-muted">
+            <p className="text-lg font-bold">{doneTitle} 🎉</p>
+            <p className="mt-1 text-sm text-ink-muted">
               {saved
-                ? `${accountName} is now added. Download and back up the .maFile — it's the only copy.`
+                ? `${accountName || "The account"} is ready. Download and back up the .maFile — it's the only copy.`
                 : "Download and back up the .maFile now — it's the only copy."}
             </p>
           </div>

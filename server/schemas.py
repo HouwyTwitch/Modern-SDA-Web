@@ -102,3 +102,12 @@ class EnrollFinalizeRequest(BaseModel):
 
 class EnrollCancelRequest(BaseModel):
     enrollId: str
+
+
+class EnrollMoveStartRequest(BaseModel):
+    enrollId: str
+
+
+class EnrollMoveContinueRequest(BaseModel):
+    enrollId: str
+    smsCode: str | None = None
