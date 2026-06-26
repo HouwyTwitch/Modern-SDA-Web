@@ -4,13 +4,20 @@ import { Modal } from "../common/Modal";
 import { parseMaFile, isValidSecret } from "../../lib/mafile";
 import { useStore } from "../../store/useStore";
 import type { ParsedMaFile } from "../../types";
+import { EnrollWizard } from "./EnrollWizard";
 
 interface Props {
   open: boolean;
   onClose: () => void;
 }
 
-type Tab = "file" | "manual";
+type Tab = "file" | "manual" | "enroll";
+
+const TAB_LABELS: Record<Tab, string> = {
+  file: "Import .maFile",
+  manual: "Manual",
+  enroll: "Create new",
+};
 
 export function AddAccountModal({ open, onClose }: Props) {
   const addAccount = useStore((s) => s.addAccount);
@@ -102,20 +109,22 @@ export function AddAccountModal({ open, onClose }: Props) {
   return (
     <Modal open={open} onClose={close} title="Add Account">
       <div className="mb-4 flex gap-1 rounded-xl bg-surface-sunken p-1">
-        {(["file", "manual"] as Tab[]).map((t) => (
+        {(["file", "manual", "enroll"] as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
-            className={`flex-1 rounded-lg py-2 text-sm font-semibold transition ${
+            className={`flex-1 rounded-lg py-2 text-xs font-semibold transition sm:text-sm ${
               tab === t ? "bg-surface-raised text-ink shadow" : "text-ink-muted"
             }`}
           >
-            {t === "file" ? "Import .maFile" : "Manual"}
+            {TAB_LABELS[t]}
           </button>
         ))}
       </div>
 
-      {tab === "file" ? (
+      {tab === "enroll" ? (
+        <EnrollWizard onClose={close} />
+      ) : tab === "file" ? (
         <div>
           <div
             onDragOver={(e) => {

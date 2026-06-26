@@ -7,6 +7,7 @@ shared secret and posts to UpdateAuthSessionWithMobileConfirmation.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import hmac
@@ -58,19 +59,24 @@ async def fetch_avatar(steam_id: str, proxy: str | None = None) -> str | None:
     if not steam_id or not steam_id.isdigit():
         return None
     proxy = proxy if (proxy and proxy.startswith("http")) else None
-    try:
-        async with httpx.AsyncClient(
-            timeout=10,
-            follow_redirects=True,
-            proxy=proxy,
-            headers={"User-Agent": "Mozilla/5.0 (compatible; ModernSDA/2)"},
-        ) as c:
-            r = await c.get(f"https://steamcommunity.com/profiles/{steam_id}/?xml=1")
-        root = ET.fromstring(r.content)
-        avatar = (root.findtext("avatarFull") or root.findtext("avatarMedium") or "").strip()
-        return avatar.replace("http://", "https://") or None
-    except Exception:
-        return None
+    for attempt in range(3):
+        try:
+            async with httpx.AsyncClient(
+                timeout=10,
+                follow_redirects=True,
+                proxy=proxy,
+                headers={"User-Agent": "Mozilla/5.0 (compatible; ModernSDA/2)"},
+            ) as c:
+                r = await c.get(f"https://steamcommunity.com/profiles/{steam_id}/?xml=1")
+            root = ET.fromstring(r.content)
+            avatar = (root.findtext("avatarFull") or root.findtext("avatarMedium") or "").strip()
+            return avatar.replace("http://", "https://") or None
+        except Exception:
+            if attempt < 2:
+                await asyncio.sleep(0.5 * (attempt + 1))
+                continue
+            return None
+    return None
 
 _TYPE_MAP = {
     ConfirmationType.TRADE: "trade",

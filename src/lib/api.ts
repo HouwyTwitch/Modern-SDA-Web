@@ -33,7 +33,17 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     headers["Content-Type"] = "application/json";
   }
 
-  const res = await fetch(`/api${path}`, { method, headers, body: sealed.body });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 120_000);
+  let res: Response;
+  try {
+    res = await fetch(`/api${path}`, { method, headers, body: sealed.body, signal: controller.signal });
+  } catch (e) {
+    if ((e as Error).name === "AbortError") throw new ApiError("Request timed out. Please try again.", 0);
+    throw new ApiError("Network error — is the server running?", 0);
+  } finally {
+    clearTimeout(timer);
+  }
 
   if (res.status === 204) return undefined as T;
 
@@ -118,4 +128,31 @@ export const api = {
       `/accounts/${accountId}/qr-approve`,
       { challenge_url: challengeUrl, confirm },
     ),
+
+  // ---- enrollment (create a new authenticator) ----
+  enrollLogin: (username: string, password: string) =>
+    request<{ enrollId: string; step: "email_code" | "confirm" | "ready" }>("POST", "/enroll/login", {
+      username,
+      password,
+    }),
+  enrollConfirm: (enrollId: string, emailCode?: string) =>
+    request<{ step: "sms" | "move"; accountName?: string; revocationCode?: string }>(
+      "POST",
+      "/enroll/confirm",
+      { enrollId, emailCode },
+    ),
+  enrollMoveStart: (enrollId: string) => request<{ ok: boolean }>("POST", "/enroll/move-start", { enrollId }),
+  enrollMoveContinue: (enrollId: string, smsCode?: string) =>
+    request<{ maFile: Record<string, unknown>; account: Account | null; saved: boolean }>(
+      "POST",
+      "/enroll/move-continue",
+      { enrollId, smsCode },
+    ),
+  enrollFinalize: (enrollId: string, smsCode: string) =>
+    request<{ maFile: Record<string, unknown>; account: Account | null; saved: boolean }>(
+      "POST",
+      "/enroll/finalize",
+      { enrollId, smsCode },
+    ),
+  enrollCancel: (enrollId: string) => request<{ ok: boolean }>("POST", "/enroll/cancel", { enrollId }),
 };

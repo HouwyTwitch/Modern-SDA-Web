@@ -46,8 +46,9 @@ class Settings:
         self.jwt_secret: str = os.getenv("JWT_SECRET") or _persisted_secret(".dev_jwt.key")
         self.jwt_algorithm: str = "HS256"
         self.jwt_ttl_minutes: int = int(os.getenv("JWT_TTL_MINUTES", "720"))  # 12h
-        # How long a user's password-derived key stays cached in memory.
-        self.unlock_ttl_minutes: int = int(os.getenv("UNLOCK_TTL_MINUTES", "60"))
+        # How long a user's password-derived key stays cached in memory (sliding;
+        # refreshed on activity).
+        self.unlock_ttl_minutes: int = int(os.getenv("UNLOCK_TTL_MINUTES", "240"))
         self.cors_origins: list[str] = [
             o.strip()
             for o in os.getenv(

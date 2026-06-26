@@ -39,6 +39,10 @@ def cache_user_key(sid: str, user_key: bytes) -> None:
     _unlock_cache[sid] = (user_key, time.time() + settings.unlock_ttl_minutes * 60)
 
 
+def _ttl() -> float:
+    return settings.unlock_ttl_minutes * 60
+
+
 def get_cached_user_key(sid: str) -> bytes | None:
     entry = _unlock_cache.get(sid)
     if not entry:
@@ -47,7 +51,16 @@ def get_cached_user_key(sid: str) -> bytes | None:
     if exp < time.time():
         _unlock_cache.pop(sid, None)
         return None
+    # Sliding expiry: extend on use so an active session never locks.
+    _unlock_cache[sid] = (key, time.time() + _ttl())
     return key
+
+
+def touch_session(sid: str) -> None:
+    """Extend the unlock-cache TTL for an active session (called per request)."""
+    entry = _unlock_cache.get(sid)
+    if entry and entry[1] >= time.time():
+        _unlock_cache[sid] = (entry[0], time.time() + _ttl())
 
 
 def clear_session(sid: str) -> None:
@@ -79,7 +92,9 @@ async def current_principal(
     user = await db.get(User, payload.get("sub"))
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
-    return Principal(user=user, sid=payload.get("sid", ""))
+    sid = payload.get("sid", "")
+    touch_session(sid)  # keep the unlock key alive while the user is active
+    return Principal(user=user, sid=sid)
 
 
 async def get_user_by_email(db: AsyncSession, email: str) -> User | None:

@@ -59,6 +59,26 @@ Fill in the fields:
 
 New accounts appear in the list with a live, rotating Steam Guard code.
 
+### Create a new authenticator (enroll Steam Guard)
+The **Create new** tab in *Add Account* enrolls a brand-new Steam Mobile
+Authenticator on an account and produces a `.maFile` (logic mirrors
+[geel9/SteamAuth](https://github.com/geel9/SteamAuth)).
+
+> The account **must already have a phone number attached on Steam** — Steam
+> requires it for the mobile authenticator and sends the activation code by SMS.
+
+Steps:
+1. **Sign in** — enter the Steam username and password.
+2. **Email code** — Steam emails a guard code; enter it.
+3. **SMS code** — Steam texts your phone an activation code. **Write down the
+   revocation code shown on this step** (`R#####`) — you need it to remove the
+   authenticator later, and it's shown only once.
+4. **Done** — the account is added and you can **download the `.maFile`**.
+
+> ⚠️ **Back up the `.maFile` immediately.** It is the only copy of your new
+> Steam Guard secret. Also keep the revocation code. Enrolling a new
+> authenticator replaces any existing one on that account.
+
 ## Signing in to Steam
 
 Generating codes works offline. **Confirmations and QR approval need a Steam session.**
