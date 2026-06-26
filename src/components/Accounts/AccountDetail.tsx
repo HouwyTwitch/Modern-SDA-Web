@@ -30,7 +30,7 @@ export function AccountDetail({ account, remaining, onClose }: Props) {
   return (
     <>
       <div className="fixed inset-0 z-40 bg-black/50 animate-fade-in lg:hidden" onClick={onClose} />
-      <div className="fixed inset-y-0 right-0 z-40 flex w-full max-w-md animate-fade-in flex-col border-l border-line bg-surface-raised shadow-2xl lg:relative lg:z-0 lg:shadow-none">
+      <div className="fixed inset-0 z-50 flex h-full w-full flex-col bg-surface-raised animate-fade-in lg:relative lg:inset-auto lg:z-0 lg:h-full lg:border-l lg:border-line">
         <div className="flex items-center justify-between border-b border-line p-4">
           <div className="flex items-center gap-3">
             <Avatar name={account.name} color={account.avatarColor} url={account.avatarUrl} size={40} />
