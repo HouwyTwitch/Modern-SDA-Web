@@ -42,12 +42,26 @@ MOBILE_UA = (
     "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36"
 )
-PENDING_TTL = 600  # seconds
+PENDING_TTL = 1800  # seconds — long enough for the email + SMS steps
 _DUMMY_SECRET = base64.b64encode(bytes(20)).decode()  # never used; satisfies the ctor
 
 
 class EnrollError(Exception):
     pass
+
+
+async def _post(url: str, data: dict, *, timeout: int = 25, retries: int = 2) -> httpx.Response:
+    """POST with retries on transient network errors (not on Steam status codes)."""
+    last: Exception | None = None
+    for attempt in range(retries + 1):
+        try:
+            async with httpx.AsyncClient(timeout=timeout, headers={"User-Agent": MOBILE_UA}) as c:
+                return await c.post(url, data=data)
+        except httpx.TransportError as exc:  # timeout / connection reset / etc.
+            last = exc
+            if attempt < retries:
+                await asyncio.sleep(0.6 * (attempt + 1))
+    raise EnrollError(f"Network error talking to Steam: {last}")
 
 
 class _Pending:
@@ -209,18 +223,19 @@ async def add_authenticator(enroll_id: str, owner: str) -> dict:
     if not p.access_token:
         raise EnrollError("Not signed in yet.")
     try:
-        async with httpx.AsyncClient(timeout=25, headers={"User-Agent": MOBILE_UA}) as c:
-            r = await c.post(
-                f"{API}/ITwoFactorService/AddAuthenticator/v1/?access_token={p.access_token}",
-                data={
-                    "steamid": p.steamid,
-                    "authenticator_type": "1",
-                    "device_identifier": p.device_id,
-                    "sms_phone_id": "1",
-                    "version": "2",
-                },
-            )
+        r = await _post(
+            f"{API}/ITwoFactorService/AddAuthenticator/v1/?access_token={p.access_token}",
+            {
+                "steamid": p.steamid,
+                "authenticator_type": "1",
+                "device_identifier": p.device_id,
+                "sms_phone_id": "1",
+                "version": "2",
+            },
+        )
         resp = r.json().get("response")
+    except EnrollError:
+        raise
     except Exception as exc:  # noqa: BLE001
         raise EnrollError(f"Steam error while adding authenticator: {exc}") from exc
 
@@ -241,8 +256,7 @@ async def add_authenticator(enroll_id: str, owner: str) -> dict:
 # ---------------- step 4: finalize ----------------
 async def _steam_time_offset() -> int:
     try:
-        async with httpx.AsyncClient(timeout=10, headers={"User-Agent": MOBILE_UA}) as c:
-            r = await c.post(f"{API}/ITwoFactorService/QueryTime/v0001/")
+        r = await _post(f"{API}/ITwoFactorService/QueryTime/v0001/", {}, timeout=10)
         return int(r.json()["response"]["server_time"]) - int(time.time())
     except Exception:
         return 0
@@ -261,18 +275,19 @@ async def finalize(enroll_id: str, sms_code: str, owner: str) -> dict:
         t = int(time.time()) + offset
         code = steam_guard.generate_code(shared, t)
         try:
-            async with httpx.AsyncClient(timeout=25, headers={"User-Agent": MOBILE_UA}) as c:
-                r = await c.post(
-                    f"{API}/ITwoFactorService/FinalizeAddAuthenticator/v1/?access_token={p.access_token}",
-                    data={
-                        "steamid": p.steamid,
-                        "authenticator_code": code,
-                        "authenticator_time": str(t),
-                        "activation_code": sms_code.strip(),
-                        "validate_sms_code": "1",
-                    },
-                )
+            r = await _post(
+                f"{API}/ITwoFactorService/FinalizeAddAuthenticator/v1/?access_token={p.access_token}",
+                {
+                    "steamid": p.steamid,
+                    "authenticator_code": code,
+                    "authenticator_time": str(t),
+                    "activation_code": sms_code.strip(),
+                    "validate_sms_code": "1",
+                },
+            )
             resp = r.json().get("response")
+        except EnrollError:
+            raise
         except Exception as exc:  # noqa: BLE001
             raise EnrollError(f"Steam error during finalize: {exc}") from exc
 

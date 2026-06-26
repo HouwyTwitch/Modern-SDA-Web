@@ -33,7 +33,17 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     headers["Content-Type"] = "application/json";
   }
 
-  const res = await fetch(`/api${path}`, { method, headers, body: sealed.body });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 120_000);
+  let res: Response;
+  try {
+    res = await fetch(`/api${path}`, { method, headers, body: sealed.body, signal: controller.signal });
+  } catch (e) {
+    if ((e as Error).name === "AbortError") throw new ApiError("Request timed out. Please try again.", 0);
+    throw new ApiError("Network error — is the server running?", 0);
+  } finally {
+    clearTimeout(timer);
+  }
 
   if (res.status === 204) return undefined as T;
 

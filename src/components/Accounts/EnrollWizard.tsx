@@ -90,7 +90,8 @@ export function EnrollWizard({ onClose }: Props) {
 
   function downloadMaFile() {
     if (!maFile) return;
-    const name = (maFile.account_name as string) || (maFile.Session as { SteamID?: number })?.SteamID || "account";
+    const raw = (maFile.account_name as string) || (maFile.Session as { SteamID?: number })?.SteamID || "account";
+    const name = String(raw).replace(/[^a-zA-Z0-9._-]/g, "_") || "account";
     const blob = new Blob([JSON.stringify(maFile, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -140,7 +141,7 @@ export function EnrollWizard({ onClose }: Props) {
             phone number attached on Steam.
           </div>
           <Field label="Steam username" value={username} onChange={setUsername} placeholder="login" autoFocus />
-          <Field label="Steam password" value={password} onChange={setPassword} placeholder="••••••••" type="password" />
+          <Field label="Steam password" value={password} onChange={setPassword} placeholder="••••••••" type="password" onEnter={() => username && password && login()} />
           <Action onClick={login} busy={busy} disabled={!username || !password} icon={<KeyRound size={16} />}>
             Continue
           </Action>
@@ -152,7 +153,7 @@ export function EnrollWizard({ onClose }: Props) {
           <p className="text-sm text-ink-muted">
             Steam emailed a confirmation code to the account's email. Enter it below.
           </p>
-          <Field label="Email code" value={emailCode} onChange={setEmailCode} placeholder="ABCDE" autoFocus mono />
+          <Field label="Email code" value={emailCode} onChange={setEmailCode} placeholder="ABCDE" autoFocus mono onEnter={() => emailCode && confirmEmail()} />
           <Action onClick={confirmEmail} busy={busy} disabled={!emailCode} icon={<Mail size={16} />}>
             Verify & request SMS
           </Action>
@@ -186,7 +187,7 @@ export function EnrollWizard({ onClose }: Props) {
             Steam sent an SMS code to the phone on <span className="font-medium">{accountName}</span>. Enter it
             to activate.
           </p>
-          <Field label="SMS code" value={smsCode} onChange={setSmsCode} placeholder="12345" autoFocus mono />
+          <Field label="SMS code" value={smsCode} onChange={setSmsCode} placeholder="12345" autoFocus mono onEnter={() => smsCode && finalize()} />
           <Action onClick={finalize} busy={busy} disabled={!smsCode} icon={<Smartphone size={16} />}>
             Activate authenticator
           </Action>
@@ -258,6 +259,7 @@ function Field({
   label,
   value,
   onChange,
+  onEnter,
   placeholder,
   type = "text",
   mono,
@@ -266,6 +268,7 @@ function Field({
   label: string;
   value: string;
   onChange: (v: string) => void;
+  onEnter?: () => void;
   placeholder?: string;
   type?: string;
   mono?: boolean;
@@ -280,6 +283,7 @@ function Field({
         className={`input ${mono ? "font-mono tracking-wider" : ""}`}
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && onEnter?.()}
         placeholder={placeholder}
       />
     </div>
